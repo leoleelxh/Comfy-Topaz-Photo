@@ -77,6 +77,28 @@ class ComfyTopazPhotoSharpenSettings:
         self.model = model
         return (self,)
 
+# 添加 Face Recovery 设置类
+class ComfyTopazPhotoFaceRecoverySettings:       
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            'required': {
+                'enabled': (['true', 'false'], {'default': 'true'}),
+                # Face Recovery 没有model选项，只有开关
+            },
+        }
+
+    RETURN_TYPES = ('ComfyTopazPhotoFaceRecoverySettings',)
+    RETURN_NAMES = ('face_recovery_settings',)
+    FUNCTION = 'init'
+    CATEGORY = 'ComfyTopazPhoto'
+    OUTPUT_IS_LIST = (False,)
+    
+    def init(self, enabled):
+        # 简化初始化
+        self.enabled = str(True).lower() == enabled.lower()
+        return (self,)
+
 # 重命名主类
 class ComfyTopazPhoto:
     '''
@@ -110,6 +132,7 @@ class ComfyTopazPhoto:
                 # 更新设置输入的类型名称
                 'upscale': ('ComfyTopazPhotoUpscaleSettings',),
                 'sharpen': ('ComfyTopazPhotoSharpenSettings',),
+                'face_recovery': ('ComfyTopazPhotoFaceRecoverySettings',),
             },
             "hidden": {
             }
@@ -205,7 +228,8 @@ class ComfyTopazPhoto:
     def topaz_upscale(self, img_file, compression=0, format='png', tpai_exe=None, 
                       # 更新类型提示
                       upscale: Optional[ComfyTopazPhotoUpscaleSettings]=None, 
-                      sharpen: Optional[ComfyTopazPhotoSharpenSettings]=None):
+                      sharpen: Optional[ComfyTopazPhotoSharpenSettings]=None,
+                      face_recovery: Optional[ComfyTopazPhotoFaceRecoverySettings]=None):
         
         log_prefix = '\033[31mComfyTopazPhoto:\033[0m' # 日志前缀
 
@@ -227,7 +251,7 @@ class ComfyTopazPhoto:
         ]
         
         # 检查是否有任何启用的手动设置
-        has_manual_settings = (upscale and upscale.enabled) or (sharpen and sharpen.enabled)
+        has_manual_settings = (upscale and upscale.enabled) or (sharpen and sharpen.enabled) or (face_recovery and face_recovery.enabled)
         
         # 如果有手动设置，添加 --override 标志
         if has_manual_settings:
@@ -252,6 +276,14 @@ class ComfyTopazPhoto:
                 tpai_args.append('--sharpen')
                 # 只传递 model 参数 (注意 Sharpen 模型名称可能需要前缀)
                 tpai_args.append(f'model=Sharpen {sharpen.model}')
+        
+        if face_recovery:
+            print(f'{log_prefix} face recovery settings provided:', pprint.pformat(face_recovery.__dict__))
+            # 只在启用时添加face标志
+            if face_recovery.enabled:
+                print(f'{log_prefix} Enabling --face flag for face recovery.')
+                tpai_args.append('--face')
+                # face recovery 没有model参数
             
         tpai_args.append(img_file)
         print(f'{log_prefix} tpaie.exe args:', pprint.pformat(tpai_args))
@@ -277,7 +309,8 @@ class ComfyTopazPhoto:
     def upscale_image(self, images, compression=0, format='png', tpai_exe=None, 
                       # 更新类型提示
                       upscale: Optional[ComfyTopazPhotoUpscaleSettings]=None, 
-                      sharpen: Optional[ComfyTopazPhotoSharpenSettings]=None):
+                      sharpen: Optional[ComfyTopazPhotoSharpenSettings]=None,
+                      face_recovery: Optional[ComfyTopazPhotoFaceRecoverySettings]=None):
         now_millis = int(time.time() * 1000)
         prefix = '%s-%d' % (self.prefix, now_millis)
         upscaled_images = []
@@ -292,7 +325,10 @@ class ComfyTopazPhoto:
                 img, self.output_dir, '%s-%d.png' % (prefix, count)
             )
             # 调用内部方法
-            (upscaled_img_file, user_settings, autopilot_settings) = self.topaz_upscale(img_file, compression, format, tpai_exe=tpai_exe, upscale=upscale, sharpen=sharpen)
+            (upscaled_img_file, user_settings, autopilot_settings) = self.topaz_upscale(
+                img_file, compression, format, tpai_exe=tpai_exe, 
+                upscale=upscale, sharpen=sharpen, face_recovery=face_recovery
+            )
             upscaled_image = self.load_image(upscaled_img_file)
             upscaled_images.append(upscaled_image)
             upscale_user_settings.append(user_settings)
@@ -305,6 +341,7 @@ NODE_CLASS_MAPPINGS = {
     'ComfyTopazPhoto': ComfyTopazPhoto,
     'ComfyTopazPhotoSharpenSettings': ComfyTopazPhotoSharpenSettings,
     'ComfyTopazPhotoUpscaleSettings': ComfyTopazPhotoUpscaleSettings,
+    'ComfyTopazPhotoFaceRecoverySettings': ComfyTopazPhotoFaceRecoverySettings,
 }
 
 # 更新节点显示名称映射
@@ -312,4 +349,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     'ComfyTopazPhoto': 'ComfyTopazPhoto', # 主节点显示名称
     'ComfyTopazPhotoSharpenSettings': 'ComfyTopazPhoto Sharpen Settings',
     'ComfyTopazPhotoUpscaleSettings': 'ComfyTopazPhoto Upscale Settings',
+    'ComfyTopazPhotoFaceRecoverySettings': 'ComfyTopazPhoto Face Recovery Settings',
 }
