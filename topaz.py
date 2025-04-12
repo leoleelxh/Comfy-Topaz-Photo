@@ -26,13 +26,7 @@ class ComfyTopazPhotoUpscaleSettings:
                     #'Graphics', what is this
                     'Low Resolution'
                 ], {'default': 'Standard V2'}),
-                'scale': ('FLOAT', {'default': 2.0, 'min': 0, 'max': 10, 'round': False, }),
-                'denoise': ('FLOAT', {'default': 0.2, 'min': 0, 'max': 10, 'round': False, 'display': 'denoise (param1)'}),
-                'deblur': ('FLOAT', {'default': 0.2, 'min': 0, 'max': 10, 'round': False, 'display': 'deblur (param2)'}),
-                'detail': ('FLOAT', {'default': 0.2, 'min': 0, 'max': 10, 'round': False, 'display': 'detail (param3)'}),
-            },
-            'optional': {
-
+                # 删除了其他所有参数，因为它们不可靠
             },
         }
 
@@ -45,13 +39,10 @@ class ComfyTopazPhotoUpscaleSettings:
     OUTPUT_NODE = False
     OUTPUT_IS_LIST = (False,)
     
-    def init(self, enabled, model, scale, denoise, deblur, detail):
+    def init(self, enabled, model):
+        # 简化初始化
         self.enabled = str(True).lower() == enabled.lower()
         self.model = model
-        self.scale = scale
-        self.denoise = denoise
-        self.deblur = deblur
-        self.detail = detail
         return (self,)
 
 # 重命名 Sharpen 设置类
@@ -68,17 +59,7 @@ class ComfyTopazPhotoSharpenSettings:
                     #'Lens Blur', 
                     #'Motion Blur', 
                 ], {'default': 'Standard'}),
-                'compression': ('FLOAT', {'default': 0.5, 'min': 0, 'max': 1, 'round': 0.01,}),
-                'is_lens': (['true', 'false'], {'default': 'false'}),
-                'lensblur': ('FLOAT', {'default': 0.0, 'min': 0, 'max': 10, 'round': False,}),
-                'mask': (['true', 'false'], {'default': 'false'}),
-                'motionblur': ('FLOAT', {'default': 0.0, 'min': 0, 'max': 10, 'round': False,}),
-                'noise': ('FLOAT', {'default': 0.0, 'min': 0, 'max': 10, 'round': False,}),
-                'strength': ('FLOAT', {'default': 0.0, 'min': 0, 'max': 10, 'round': False, 'display': 'strength (param1)'}), # TODO: why doesn't "display" work?
-                'denoise': ('FLOAT', {'default': 0.0, 'min': 0, 'max': 10, 'round': False, "display": 'denoise (param2)'}),   # param2 (Lens/Motion Blur only)
-            },
-            'optional': {
-                
+                # 删除了其他所有参数，因为它们不可靠
             },
         }
 
@@ -90,17 +71,10 @@ class ComfyTopazPhotoSharpenSettings:
     CATEGORY = 'ComfyTopazPhoto'
     OUTPUT_IS_LIST = (False,)
     
-    def init(self, enabled, model, compression, is_lens, lensblur, mask, motionblur, noise, strength, denoise):
+    def init(self, enabled, model):
+        # 简化初始化
         self.enabled = str(True).lower() == enabled.lower()
         self.model = model
-        self.compression = compression
-        self.is_lens = is_lens
-        self.lensblur = lensblur
-        self.mask = mask
-        self.motionblur = motionblur
-        self.noise = noise
-        self.strength = strength
-        self.denoise = denoise
         return (self,)
 
 # 重命名主类
@@ -233,7 +207,7 @@ class ComfyTopazPhoto:
                       upscale: Optional[ComfyTopazPhotoUpscaleSettings]=None, 
                       sharpen: Optional[ComfyTopazPhotoSharpenSettings]=None):
         
-        log_prefix = '\033[31mComfyTopazPhoto:\033[0m' # 更新日志前缀
+        log_prefix = '\033[31mComfyTopazPhoto:\033[0m' # 日志前缀
 
         if not os.path.exists(tpai_exe):
             raise ValueError('Topaz Photo AI executable not found at %s' % tpai_exe)
@@ -261,38 +235,23 @@ class ComfyTopazPhoto:
             tpai_args.append('--override')
 
         if upscale:
-            print(f'{log_prefix} upscaler settings provided:', pprint.pformat(upscale))
-            # 只在启用时添加主标志，并传递 model, param1, param2, param3 参数
+            print(f'{log_prefix} upscaler settings provided:', pprint.pformat(upscale.__dict__))
+            # 只在启用时添加主标志和model参数
             if upscale.enabled:
-                print(f'{log_prefix} Enabling --upscale, specifying model, denoise(p1), deblur(p2), detail(p3).')
+                print(f'{log_prefix} Enabling --upscale, specifying model only.')
                 tpai_args.append('--upscale')
-                # 传递 model 参数
+                # 只传递 model 参数
                 tpai_args.append(f'model={upscale.model}')
-                # 保持 scale 注释掉 - CLI 处理此参数似乎有问题
-                # try:
-                #     # 尝试强制将 scale 转为整数
-                #     scale_int = int(upscale.scale) 
-                #     tpai_args.append(f'scale={scale_int}') 
-                #     print(f'{log_prefix} Attempting to pass scale as integer: {scale_int}')
-                # except ValueError:
-                #      print(f'{log_prefix} Warning: Could not convert scale {upscale.scale} to integer. Skipping scale parameter.')
-
-                # 传递 param1, param2, param3 参数
-                tpai_args.append(f'param1={upscale.denoise}') # Minor Denoise
-                tpai_args.append(f'param2={upscale.deblur}')  # Minor Deblur
-                tpai_args.append(f'param3={upscale.detail}')  # Fix Compression
-                
+                # 不再传递其他参数
             
         if sharpen:
-            print(f'{log_prefix} sharpen settings provided:', pprint.pformat(sharpen))
-             # 只在启用时添加主标志，并传递 model 参数 (保持之前的有效状态)
+            print(f'{log_prefix} sharpen settings provided:', pprint.pformat(sharpen.__dict__))
+             # 只在启用时添加主标志和model参数
             if sharpen.enabled:
                 print(f'{log_prefix} Enabling --sharpen and specifying model.')
                 tpai_args.append('--sharpen')
                 # 只传递 model 参数 (注意 Sharpen 模型名称可能需要前缀)
                 tpai_args.append(f'model=Sharpen {sharpen.model}')
-            # 注释掉传递其他子参数的代码
-            # ...
             
         tpai_args.append(img_file)
         print(f'{log_prefix} tpaie.exe args:', pprint.pformat(tpai_args))
