@@ -11,7 +11,8 @@ from PIL import Image, ImageOps
 from typing import Optional
 import json
 
-class TopazUpscaleSettings:
+# 重命名 Upscale 设置类
+class ComfyTopazPhotoUpscaleSettings:
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -35,10 +36,12 @@ class TopazUpscaleSettings:
             },
         }
 
-    RETURN_TYPES = ('TopazUpscaleSettings',)
+    # 更新返回类型名称
+    RETURN_TYPES = ('ComfyTopazPhotoUpscaleSettings',)
     RETURN_NAMES = ('upscale_settings',)
     FUNCTION = 'init'
-    CATEGORY = 'image'
+    # 更新类别，保持一致性
+    CATEGORY = 'ComfyTopazPhoto' 
     OUTPUT_NODE = False
     OUTPUT_IS_LIST = (False,)
     
@@ -51,7 +54,8 @@ class TopazUpscaleSettings:
         self.detail = detail
         return (self,)
 
-class TopazSharpenSettings:       
+# 重命名 Sharpen 设置类
+class ComfyTopazPhotoSharpenSettings:       
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -78,10 +82,12 @@ class TopazSharpenSettings:
             },
         }
 
-    RETURN_TYPES = ('TopazSharpenSettings',)
+    # 更新返回类型名称
+    RETURN_TYPES = ('ComfyTopazPhotoSharpenSettings',)
     RETURN_NAMES = ('sharpen_settings',)
     FUNCTION = 'init'
-    CATEGORY = 'image'
+    # 更新类别，保持一致性
+    CATEGORY = 'ComfyTopazPhoto'
     OUTPUT_IS_LIST = (False,)
     
     def init(self, enabled, model, compression, is_lens, lensblur, mask, motionblur, noise, strength, denoise):
@@ -97,9 +103,10 @@ class TopazSharpenSettings:
         self.denoise = denoise
         return (self,)
 
-class TopazPhotoAI:
+# 重命名主类
+class ComfyTopazPhoto:
     '''
-    A node that uses Topaz Image AI (tpai.exe) behind the scenes to enhance (upscale/sharpen/denoise/etc.) the given image(s).
+    A node that uses Topaz Photo AI (tpai.exe) behind the scenes to enhance (upscale/sharpen/denoise/etc.) the given image(s).
     
     If no settings are provided, auto-detected (auto-pilot) settings are used.
     '''
@@ -108,7 +115,7 @@ class TopazPhotoAI:
         self.comfy_dir = os.path.abspath(os.path.join(self.this_dir, '..', '..'))
         self.subfolder = 'upscaled'
         self.output_dir = os.path.join(self.comfy_dir, 'temp')
-        self.prefix = 'tpai'
+        self.prefix = 'tpai' # 可以考虑改成 'ctp' (ComfyTopazPhoto)
         # self.tpai = 'C:/Program Files/Topaz Labs LLC/Topaz Photo AI/tpai.exe'
 
     @classmethod
@@ -126,10 +133,9 @@ class TopazPhotoAI:
                 'tpai_exe': ('STRING', {
                     'default': '',                    
                 }),
-                # 'blur_level': ('FLOAT', {'default': -1, 'min': -10, 'max': 10}),
-                # 'noise_level': ('FLOAT', {'default': -1, 'min': -10, 'max': 10}),
-                'upscale': ('TopazUpscaleSettings',),
-                'sharpen': ('TopazSharpenSettings',),
+                # 更新设置输入的类型名称
+                'upscale': ('ComfyTopazPhotoUpscaleSettings',),
+                'sharpen': ('ComfyTopazPhotoSharpenSettings',),
             },
             "hidden": {
             }
@@ -138,7 +144,8 @@ class TopazPhotoAI:
     RETURN_TYPES = ('STRING', 'STRING', 'IMAGE')
     RETURN_NAMES = ('settings', 'autopilot_settings', 'IMAGE')
     FUNCTION = 'upscale_image'
-    CATEGORY = 'image'
+    # 更新类别
+    CATEGORY = 'ComfyTopazPhoto'
     OUTPUT_NODE = True
     OUTPUT_IS_LIST = (True, True, True)
 
@@ -159,11 +166,11 @@ class TopazPhotoAI:
         return image
 
     def get_settings(self, stdout):
-        '''
-        Extracts the settings JSON string from the stdout of the tpai.exe process
-        '''
+        # ... (内容保持不变)
+        # 可以考虑更新日志前缀
+        log_prefix = '\033[31mComfyTopazPhoto:\033[0m'
         if not stdout:
-            print('\033[31mComfy-Topaz:\033[0m Warning: Received empty stdout for get_settings.')
+            print(f'{log_prefix} Warning: Received empty stdout for get_settings.')
             return '{}', '{}'
 
         settings_json = '{}'
@@ -173,14 +180,14 @@ class TopazPhotoAI:
             settings_start = stdout.find(settings_start_marker)
 
             if settings_start == -1:
-                print(f'\033[31mComfy-Topaz:\033[0m Warning: "{settings_start_marker}" not found in stdout. Cannot extract settings.')
-                print(f'\033[31mComfy-Topaz:\033[0m Full stdout was:\n{stdout}')
+                print(f'{log_prefix} Warning: "{settings_start_marker}" not found in stdout. Cannot extract settings.')
+                print(f'{log_prefix} Full stdout was:\n{stdout}')
                 return '{}', '{}'
 
             settings_start = stdout.find('{', settings_start)
 
             if settings_start == -1:
-                print('\033[31mComfy-Topaz:\033[0m Warning: Could not find opening brace \'{\' after settings marker.')
+                print(f'{log_prefix} Warning: Could not find opening brace \'{{\' after settings marker.')
                 return '{}', '{}'
 
             count = 0
@@ -200,7 +207,7 @@ class TopazPhotoAI:
                     settings_end = i
                     break
             else:
-                print('\033[31mComfy-Topaz:\033[0m Warning: Could not find matching closing brace \'}\' for settings JSON.')
+                print(f'{log_prefix} Warning: Could not find matching closing brace \'}}\' for settings JSON.')
                 return '{}', '{}'
 
             settings_json_str = str(stdout[settings_start : settings_end + 1])
@@ -211,23 +218,27 @@ class TopazPhotoAI:
             autopilot_settings_json = json.dumps(autopilot_settings, indent=2).replace('"', "'")
 
         except json.JSONDecodeError as e:
-            print(f'\033[31mComfy-Topaz:\033[0m Error decoding settings JSON: {e}')
-            print(f'\033[31mComfy-Topaz:\033[0m Extracted string was: {settings_json_str}')
+            print(f'{log_prefix} Error decoding settings JSON: {e}')
+            print(f'{log_prefix} Extracted string was: {settings_json_str}')
             return '{}', '{}'
         except Exception as e:
-            print(f'\033[31mComfy-Topaz:\033[0m An unexpected error occurred in get_settings: {e}')
-            print(f'\033[31mComfy-Topaz:\033[0m Full stdout was:\n{stdout}')
+            print(f'{log_prefix} An unexpected error occurred in get_settings: {e}')
+            print(f'{log_prefix} Full stdout was:\n{stdout}')
             return '{}', '{}'
 
         return user_settings_json, autopilot_settings_json
 
     def topaz_upscale(self, img_file, compression=0, format='png', tpai_exe=None, 
-                      upscale: Optional[TopazUpscaleSettings]=None, 
-                      sharpen: Optional[TopazSharpenSettings]=None):
+                      # 更新类型提示
+                      upscale: Optional[ComfyTopazPhotoUpscaleSettings]=None, 
+                      sharpen: Optional[ComfyTopazPhotoSharpenSettings]=None):
+        
+        log_prefix = '\033[31mComfyTopazPhoto:\033[0m' # 更新日志前缀
+
         if not os.path.exists(tpai_exe):
-            raise ValueError('Topaz AI Upscaler not found at %s' % tpai_exe)
+            raise ValueError('Topaz Photo AI executable not found at %s' % tpai_exe)
         if compression < 0 or compression > 10:
-            raise ValueError('compression must be between 0 and 10')        
+            raise ValueError('Compression value must be between 0 and 10')        
         
         target_dir = os.path.join(self.output_dir, self.subfolder)
         tpai_args = [
@@ -246,56 +257,38 @@ class TopazPhotoAI:
         
         # 如果有手动设置，添加 --override 标志
         if has_manual_settings:
-            print('\033[31mComfy-Topaz:\033[0m Adding --override flag because manual settings are provided.')
+            print(f'{log_prefix} Adding --override flag because manual settings are provided.')
             tpai_args.append('--override')
 
         if upscale:
-            print('\033[31mComfy-Topaz:\033[0m upscaler settings provided:', pprint.pformat(upscale))
+            print(f'{log_prefix} upscaler settings provided:', pprint.pformat(upscale))
             # 只在启用时添加主标志，并传递 model 参数
             if upscale.enabled:
-                print('\033[31mComfy-Topaz:\033[0m Enabling --upscale and specifying model.')
+                print(f'{log_prefix} Enabling --upscale and specifying model.')
                 tpai_args.append('--upscale')
                 # 只传递 model 参数
                 tpai_args.append(f'model={upscale.model}')
             # 注释掉传递其他子参数的代码
-            # if upscale.enabled:
-            #     tpai_args.append(f'scale={upscale.scale}')
-            #     tpai_args.append(f'param1={upscale.denoise}') # Minor Denoise
-            #     tpai_args.append(f'param2={upscale.deblur}')  # Minor Deblur
-            #     tpai_args.append(f'param3={upscale.detail}')  # Fix Compression
-            #     # tpai_args.append(f'model={upscale.model}') # 已移到上面
-            # else:
-            #     pass 
+            # ...
                 
             
         if sharpen:
-            print('\033[31mComfy-Topaz:\033[0m sharpen settings provided:', pprint.pformat(sharpen))
+            print(f'{log_prefix} sharpen settings provided:', pprint.pformat(sharpen))
              # 只在启用时添加主标志，并传递 model 参数
             if sharpen.enabled:
-                print('\033[31mComfy-Topaz:\033[0m Enabling --sharpen and specifying model.')
+                print(f'{log_prefix} Enabling --sharpen and specifying model.')
                 tpai_args.append('--sharpen')
                 # 只传递 model 参数 (注意 Sharpen 模型名称可能需要前缀)
                 tpai_args.append(f'model=Sharpen {sharpen.model}')
             # 注释掉传递其他子参数的代码
-            # if sharpen.enabled:
-            #     # tpai_args.append(f'model=Sharpen {sharpen.model}') # 已移到上面
-            #     tpai_args.append(f'compression={sharpen.compression}')
-            #     tpai_args.append(f'is_lens={str(sharpen.is_lens).lower()}')
-            #     tpai_args.append(f'lensblur={sharpen.lensblur}')
-            #     tpai_args.append(f'mask={str(sharpen.mask).lower()}')
-            #     tpai_args.append(f'motionblur={sharpen.motionblur}')
-            #     tpai_args.append(f'noise={sharpen.noise}')
-            #     tpai_args.append(f'param1={sharpen.strength}')
-            #     tpai_args.append(f'param2={sharpen.denoise}')
-            # else:
-            #     pass
+            # ...
             
         tpai_args.append(img_file)
-        print('\033[31mComfy-Topaz:\033[0m tpaie.exe args:', pprint.pformat(tpai_args))
+        print(f'{log_prefix} tpaie.exe args:', pprint.pformat(tpai_args))
         p_tpai = subprocess.run(tpai_args, capture_output=True, text=True, shell=False, encoding='utf-8', errors='ignore')
-        print('\033[31mComfy-Topaz:\033[0m tpaie.exe return code:', p_tpai.returncode)
-        print('\033[31mComfy-Topaz:\033[0m tpaie.exe STDOUT:', p_tpai.stdout)
-        print('\033[31mComfy-Topaz:\033[0m tpaie.exe STDERR:', p_tpai.stderr)
+        print(f'{log_prefix} tpaie.exe return code:', p_tpai.returncode)
+        print(f'{log_prefix} tpaie.exe STDOUT:', p_tpai.stdout)
+        print(f'{log_prefix} tpaie.exe STDERR:', p_tpai.stderr)
 
         user_settings, autopilot_settings = self.get_settings(p_tpai.stdout)
 
@@ -304,13 +297,17 @@ class TopazPhotoAI:
             error_message = f"Topaz Photo AI execution failed with return code {p_tpai.returncode} or output file not found."
             if p_tpai.stderr:
                 error_message += f"\nSTDERR:\n{p_tpai.stderr}"
+            # 更新错误信息来源
+            print(f'{log_prefix} Raising error: {error_message}') 
             raise RuntimeError(error_message)
 
         return (output_filepath, user_settings, autopilot_settings)
 
+    # 函数名保持不变，因为它是在 ComfyUI 中注册的入口点
     def upscale_image(self, images, compression=0, format='png', tpai_exe=None, 
-                      upscale: Optional[TopazUpscaleSettings]=None, 
-                      sharpen: Optional[TopazSharpenSettings]=None):
+                      # 更新类型提示
+                      upscale: Optional[ComfyTopazPhotoUpscaleSettings]=None, 
+                      sharpen: Optional[ComfyTopazPhotoSharpenSettings]=None):
         now_millis = int(time.time() * 1000)
         prefix = '%s-%d' % (self.prefix, now_millis)
         upscaled_images = []
@@ -324,6 +321,7 @@ class TopazPhotoAI:
             img_file = self.save_image(
                 img, self.output_dir, '%s-%d.png' % (prefix, count)
             )
+            # 调用内部方法
             (upscaled_img_file, user_settings, autopilot_settings) = self.topaz_upscale(img_file, compression, format, tpai_exe=tpai_exe, upscale=upscale, sharpen=sharpen)
             upscaled_image = self.load_image(upscaled_img_file)
             upscaled_images.append(upscaled_image)
@@ -332,14 +330,16 @@ class TopazPhotoAI:
 
         return (upscale_user_settings, upscale_autopilot_settings, upscaled_images)
 
+# 更新节点映射
 NODE_CLASS_MAPPINGS = {
-    'TopazPhotoAI': TopazPhotoAI,
-    'TopazSharpenSettings': TopazSharpenSettings,
-    'TopazUpscaleSettings': TopazUpscaleSettings,
+    'ComfyTopazPhoto': ComfyTopazPhoto,
+    'ComfyTopazPhotoSharpenSettings': ComfyTopazPhotoSharpenSettings,
+    'ComfyTopazPhotoUpscaleSettings': ComfyTopazPhotoUpscaleSettings,
 }
 
+# 更新节点显示名称映射
 NODE_DISPLAY_NAME_MAPPINGS = {
-    'TopazPhotoAI': 'Topaz Photo AI',
-    'TopazSharpenSettings': 'Topaz Sharpen Settings',
-    'TopazUpscaleSettings': 'Topaz Upscale Settings',
+    'ComfyTopazPhoto': 'ComfyTopazPhoto', # 主节点显示名称
+    'ComfyTopazPhotoSharpenSettings': 'ComfyTopazPhoto Sharpen Settings',
+    'ComfyTopazPhotoUpscaleSettings': 'ComfyTopazPhoto Upscale Settings',
 }
