@@ -262,19 +262,30 @@ class ComfyTopazPhoto:
 
         if upscale:
             print(f'{log_prefix} upscaler settings provided:', pprint.pformat(upscale))
-            # 只在启用时添加主标志，并传递 model 参数
+            # 只在启用时添加主标志，并传递 model, param1, param2, param3 参数
             if upscale.enabled:
-                print(f'{log_prefix} Enabling --upscale and specifying model.')
+                print(f'{log_prefix} Enabling --upscale, specifying model, denoise(p1), deblur(p2), detail(p3).')
                 tpai_args.append('--upscale')
-                # 只传递 model 参数
+                # 传递 model 参数
                 tpai_args.append(f'model={upscale.model}')
-            # 注释掉传递其他子参数的代码
-            # ...
+                # 保持 scale 注释掉 - CLI 处理此参数似乎有问题
+                # try:
+                #     # 尝试强制将 scale 转为整数
+                #     scale_int = int(upscale.scale) 
+                #     tpai_args.append(f'scale={scale_int}') 
+                #     print(f'{log_prefix} Attempting to pass scale as integer: {scale_int}')
+                # except ValueError:
+                #      print(f'{log_prefix} Warning: Could not convert scale {upscale.scale} to integer. Skipping scale parameter.')
+
+                # 传递 param1, param2, param3 参数
+                tpai_args.append(f'param1={upscale.denoise}') # Minor Denoise
+                tpai_args.append(f'param2={upscale.deblur}')  # Minor Deblur
+                tpai_args.append(f'param3={upscale.detail}')  # Fix Compression
                 
             
         if sharpen:
             print(f'{log_prefix} sharpen settings provided:', pprint.pformat(sharpen))
-             # 只在启用时添加主标志，并传递 model 参数
+             # 只在启用时添加主标志，并传递 model 参数 (保持之前的有效状态)
             if sharpen.enabled:
                 print(f'{log_prefix} Enabling --sharpen and specifying model.')
                 tpai_args.append('--sharpen')
