@@ -19,12 +19,13 @@ class ComfyTopazPhotoUpscaleSettings:
             'required': {
                 'enabled': (['true', 'false'], {'default': 'true', 'display': 'Enable Upscaling'}),
                 'model': ([
-                    'Standard', 
-                    'Standard V2', 
-                    'High Fidelity', 
-                    'High Fidelity V2', 
-                    'Low Resolution'
-                ], {'default': 'Standard V2', 'display': 'Upscale Model'}),
+                    'Standard v2', 
+                    'Standard v1', 
+                    'High fidelity v2',
+                    'High fidelity v1',
+                    'Low resolution',
+                    'Graphics'
+                ], {'default': 'Standard v2', 'display': 'Upscale Model'}),
             },
             'optional': {
                 # 基础参数
@@ -548,9 +549,12 @@ class ComfyTopazPhoto:
         if compression < 0 or compression > 10:
             raise ValueError('Compression value must be between 0 and 10')        
         
+        # 准备参数
         target_dir = os.path.join(self.output_dir, self.subfolder)
-        tpai_args = [
-            tpai_exe,
+        
+        # 新方法：将tpai_exe与其他参数分开处理
+        exe_path = tpai_exe  # 保存可执行文件路径
+        cmd_args = [
             '--output',        # output directory
             target_dir,
             '--compression',   # compression=[0,10] (default=2)
@@ -569,7 +573,7 @@ class ComfyTopazPhoto:
         # 如果有手动设置，添加 --override 标志
         if has_manual_settings:
             print(f'{log_prefix} Adding --override flag because manual settings are provided.')
-            tpai_args.append('--override')
+            cmd_args.append('--override')
 
         # 处理Upscale设置
         if upscale:
@@ -577,39 +581,36 @@ class ComfyTopazPhoto:
             # 只在启用时添加主标志和参数
             if upscale.enabled:
                 print(f'{log_prefix} Enabling --upscale with model and parameters.')
-                tpai_args.append('--upscale')
+                cmd_args.append('--upscale')
                 
                 # 必要参数 - 模型
-                # 尝试不同的模型名称格式 - 新的 Topaz 版本可能使用不同的命名约定
+                # 保持模型名称与用户选择一致 - 不自动添加前缀
                 model_name = upscale.model
                 
                 # 输出更多模型调试信息
-                print(f'{log_prefix} 尝试使用模型名称: {model_name}')
-                print(f'{log_prefix} 您也可以尝试使用以下模型名称之一:')
-                print(f'{log_prefix}   - "Standard V2" (原始名称)')
-                print(f'{log_prefix}   - "Enhance Standard V2" (带前缀)')
-                print(f'{log_prefix}   - "enhance_std_v2" (可能的内部名称)')
+                print(f'{log_prefix} 尝试使用的模型名称: {model_name}')
+                print(f'{log_prefix} 这应与 Topaz Photo AI 界面中显示的模型名称完全一致')
                 
-                # 保持模型名称不变，因为之前添加前缀的尝试可能导致错误
-                tpai_args.append(f'model={model_name}')
+                # 使用原始模型名称，不添加前缀
+                cmd_args.append(f'model={model_name}')
                 
                 # 可选参数 - 基础参数
                 if hasattr(upscale, 'param1'):
-                    tpai_args.append(f'param1={upscale.param1}')
+                    cmd_args.append(f'param1={upscale.param1}')
                 if hasattr(upscale, 'param2'):
-                    tpai_args.append(f'param2={upscale.param2}')
+                    cmd_args.append(f'param2={upscale.param2}')
                 if hasattr(upscale, 'param3'):
-                    tpai_args.append(f'param3={upscale.param3}')
+                    cmd_args.append(f'param3={upscale.param3}')
                 
                 # 可选参数 - 高级参数
                 if hasattr(upscale, 'mode'):
-                    tpai_args.append(f'mode={upscale.mode}')
+                    cmd_args.append(f'mode={upscale.mode}')
                 if hasattr(upscale, 'resolution'):
-                    tpai_args.append(f'resolution={upscale.resolution}')
+                    cmd_args.append(f'resolution={upscale.resolution}')
                 if hasattr(upscale, 'resolution_unit'):
-                    tpai_args.append(f'resolutionUnit={upscale.resolution_unit}')
+                    cmd_args.append(f'resolutionUnit={upscale.resolution_unit}')
                 if hasattr(upscale, 'locked'):
-                    tpai_args.append(f'locked={str(upscale.locked).lower()}')
+                    cmd_args.append(f'locked={str(upscale.locked).lower()}')
         
         # 处理Sharpen设置
         if sharpen:
@@ -617,32 +618,32 @@ class ComfyTopazPhoto:
             # 只在启用时添加主标志和参数
             if sharpen.enabled:
                 print(f'{log_prefix} Enabling --sharpen with model and parameters.')
-                tpai_args.append('--sharpen')
+                cmd_args.append('--sharpen')
                 
                 # 必要参数 - 模型
                 # 确保Sharpen模型名称正确
                 model_name = sharpen.model
                 if not model_name.startswith('Sharpen '):
                     model_name = f'Sharpen {model_name}'
-                tpai_args.append(f'model={model_name}')
+                cmd_args.append(f'model={model_name}')
                 
                 # 可选参数 - 基础参数
                 if hasattr(sharpen, 'param1'):
-                    tpai_args.append(f'param1={sharpen.param1}')  # strength
+                    cmd_args.append(f'param1={sharpen.param1}')  # strength
                 if hasattr(sharpen, 'param2'):
-                    tpai_args.append(f'param2={sharpen.param2}')  # denoise
+                    cmd_args.append(f'param2={sharpen.param2}')  # denoise
                 
                 # 可选参数 - 高级参数
                 if hasattr(sharpen, 'compression'):
-                    tpai_args.append(f'compression={sharpen.compression}')
+                    cmd_args.append(f'compression={sharpen.compression}')
                 if hasattr(sharpen, 'is_lens'):
-                    tpai_args.append(f'isLens={str(sharpen.is_lens).lower()}')
+                    cmd_args.append(f'isLens={str(sharpen.is_lens).lower()}')
                 if hasattr(sharpen, 'auto'):
-                    tpai_args.append(f'auto={str(sharpen.auto).lower()}')
+                    cmd_args.append(f'auto={str(sharpen.auto).lower()}')
                 if hasattr(sharpen, 'mask'):
-                    tpai_args.append(f'mask={str(sharpen.mask).lower()}')
+                    cmd_args.append(f'mask={str(sharpen.mask).lower()}')
                 if hasattr(sharpen, 'locked'):
-                    tpai_args.append(f'locked={str(sharpen.locked).lower()}')
+                    cmd_args.append(f'locked={str(sharpen.locked).lower()}')
         
         # 处理Face Recovery设置
         if face_recovery:
@@ -650,29 +651,29 @@ class ComfyTopazPhoto:
             # 只在启用时添加face标志和参数
             if face_recovery.enabled:
                 print(f'{log_prefix} Enabling --face with model and parameters.')
-                tpai_args.append('--face')
+                cmd_args.append('--face')
                 
                 # 必要参数 - 模型
-                tpai_args.append(f'model={face_recovery.model}')
+                cmd_args.append(f'model={face_recovery.model}')
                 
                 # 可选参数 - 基础参数
                 if hasattr(face_recovery, 'param1'):
-                    tpai_args.append(f'param1={face_recovery.param1}')  # strength
+                    cmd_args.append(f'param1={face_recovery.param1}')  # strength
                 
                 # 可选参数 - 高级参数
                 if hasattr(face_recovery, 'version'):
-                    tpai_args.append(f'version={face_recovery.version}')
+                    cmd_args.append(f'version={face_recovery.version}')
                 if hasattr(face_recovery, 'face_option'):
-                    tpai_args.append(f'faceOption={face_recovery.face_option}')
+                    cmd_args.append(f'faceOption={face_recovery.face_option}')
                 if hasattr(face_recovery, 'creativity'):
-                    tpai_args.append(f'creativity={face_recovery.creativity}')
+                    cmd_args.append(f'creativity={face_recovery.creativity}')
                 if hasattr(face_recovery, 'locked'):
-                    tpai_args.append(f'locked={str(face_recovery.locked).lower()}')
+                    cmd_args.append(f'locked={str(face_recovery.locked).lower()}')
                 
                 # 面部部分
                 if hasattr(face_recovery, 'face_parts') and face_recovery.face_parts:
                     face_parts_json = json.dumps(face_recovery.face_parts)
-                    tpai_args.append(f'faceParts={face_parts_json}')
+                    cmd_args.append(f'faceParts={face_parts_json}')
         
         # 添加处理Denoise设置的代码块
         if denoise:
@@ -680,26 +681,26 @@ class ComfyTopazPhoto:
             # 只在启用时添加主标志和参数
             if denoise.enabled:
                 print(f'{log_prefix} Enabling --denoise with model and parameters.')
-                tpai_args.append('--denoise')
+                cmd_args.append('--denoise')
                 
                 # 必要参数 - 模型
-                tpai_args.append(f'model={denoise.model}')
+                cmd_args.append(f'model={denoise.model}')
                 
                 # 可选参数 - 基础参数
                 if hasattr(denoise, 'param1'):
-                    tpai_args.append(f'param1={denoise.param1}')  # strength
+                    cmd_args.append(f'param1={denoise.param1}')  # strength
                 if hasattr(denoise, 'param2'):
-                    tpai_args.append(f'param2={denoise.param2}')  # minor deblur
+                    cmd_args.append(f'param2={denoise.param2}')  # minor deblur
                 
                 # 可选参数 - 高级参数
                 if hasattr(denoise, 'original_detail'):
-                    tpai_args.append(f'recover_detail={denoise.original_detail}')
+                    cmd_args.append(f'recover_detail={denoise.original_detail}')
                 if hasattr(denoise, 'auto'):
-                    tpai_args.append(f'auto={str(denoise.auto).lower()}')
+                    cmd_args.append(f'auto={str(denoise.auto).lower()}')
                 if hasattr(denoise, 'mask'):
-                    tpai_args.append(f'mask={str(denoise.mask).lower()}')
+                    cmd_args.append(f'mask={str(denoise.mask).lower()}')
                 if hasattr(denoise, 'locked'):
-                    tpai_args.append(f'locked={str(denoise.locked).lower()}')
+                    cmd_args.append(f'locked={str(denoise.locked).lower()}')
         
         # 处理裁剪和填充设置
         if crop_padding:
@@ -707,16 +708,16 @@ class ComfyTopazPhoto:
             # 只在启用时添加主标志和参数
             if crop_padding.enabled:
                 print(f'{log_prefix} Enabling --crop and --pad with parameters.')
-                tpai_args.append('--crop')
-                tpai_args.append(f'cropLeft={crop_padding.crop_left}')
-                tpai_args.append(f'cropTop={crop_padding.crop_top}')
-                tpai_args.append(f'cropRight={crop_padding.crop_right}')
-                tpai_args.append(f'cropBottom={crop_padding.crop_bottom}')
-                tpai_args.append('--pad')
-                tpai_args.append(f'padLeft={crop_padding.pad_left}')
-                tpai_args.append(f'padTop={crop_padding.pad_top}')
-                tpai_args.append(f'padRight={crop_padding.pad_right}')
-                tpai_args.append(f'padBottom={crop_padding.pad_bottom}')
+                cmd_args.append('--crop')
+                cmd_args.append(f'cropLeft={crop_padding.crop_left}')
+                cmd_args.append(f'cropTop={crop_padding.crop_top}')
+                cmd_args.append(f'cropRight={crop_padding.crop_right}')
+                cmd_args.append(f'cropBottom={crop_padding.crop_bottom}')
+                cmd_args.append('--pad')
+                cmd_args.append(f'padLeft={crop_padding.pad_left}')
+                cmd_args.append(f'padTop={crop_padding.pad_top}')
+                cmd_args.append(f'padRight={crop_padding.pad_right}')
+                cmd_args.append(f'padBottom={crop_padding.pad_bottom}')
         
         # 处理 Text Recovery 设置
         if text_recovery:
@@ -724,29 +725,29 @@ class ComfyTopazPhoto:
             # 只在启用时添加主标志和参数
             if text_recovery.enabled:
                 print(f'{log_prefix} Enabling --text with parameters.')
-                tpai_args.append('--text')
+                cmd_args.append('--text')
                 
                 # 参数设置
                 if hasattr(text_recovery, 'param1_normal'):
-                    tpai_args.append(f'param1_normal={text_recovery.param1_normal}')
+                    cmd_args.append(f'param1_normal={text_recovery.param1_normal}')
                 if hasattr(text_recovery, 'param2_normal'):
-                    tpai_args.append(f'param2_normal={text_recovery.param2_normal}')
+                    cmd_args.append(f'param2_normal={text_recovery.param2_normal}')
                 if hasattr(text_recovery, 'param3_normal'):
-                    tpai_args.append(f'param3_normal={text_recovery.param3_normal}')
+                    cmd_args.append(f'param3_normal={text_recovery.param3_normal}')
                 if hasattr(text_recovery, 'param1_noisy'):
-                    tpai_args.append(f'param1_noisy={text_recovery.param1_noisy}')
+                    cmd_args.append(f'param1_noisy={text_recovery.param1_noisy}')
                 if hasattr(text_recovery, 'param2_noisy'):
-                    tpai_args.append(f'param2_noisy={text_recovery.param2_noisy}')
+                    cmd_args.append(f'param2_noisy={text_recovery.param2_noisy}')
                 if hasattr(text_recovery, 'param3_noisy'):
-                    tpai_args.append(f'param3_noisy={text_recovery.param3_noisy}')
+                    cmd_args.append(f'param3_noisy={text_recovery.param3_noisy}')
                 if hasattr(text_recovery, 'param4'):
-                    tpai_args.append(f'param4={text_recovery.param4}')
+                    cmd_args.append(f'param4={text_recovery.param4}')
                 
                 # 高级设置
                 if hasattr(text_recovery, 'auto'):
-                    tpai_args.append(f'auto={str(text_recovery.auto).lower()}')
+                    cmd_args.append(f'auto={str(text_recovery.auto).lower()}')
                 if hasattr(text_recovery, 'locked'):
-                    tpai_args.append(f'locked={str(text_recovery.locked).lower()}')
+                    cmd_args.append(f'locked={str(text_recovery.locked).lower()}')
         
         # 处理 Super Focus 设置
         if super_focus:
@@ -754,26 +755,42 @@ class ComfyTopazPhoto:
             # 只在启用时添加主标志和参数
             if super_focus.enabled:
                 print(f'{log_prefix} Enabling --superfocus with parameters.')
-                tpai_args.append('--superfocus')
+                cmd_args.append('--superfocus')
                 
                 # 参数设置
                 if hasattr(super_focus, 'amount'):
-                    tpai_args.append(f'superFocusStrength={super_focus.amount}')
+                    cmd_args.append(f'superFocusStrength={super_focus.amount}')
                 if hasattr(super_focus, 'radius'):
-                    tpai_args.append(f'gamma={super_focus.radius}')
+                    cmd_args.append(f'gamma={super_focus.radius}')
                 
                 # 高级设置
                 if hasattr(super_focus, 'auto'):
-                    tpai_args.append(f'auto={str(super_focus.auto).lower()}')
+                    cmd_args.append(f'auto={str(super_focus.auto).lower()}')
                 if hasattr(super_focus, 'locked'):
-                    tpai_args.append(f'locked={str(super_focus.locked).lower()}')
+                    cmd_args.append(f'locked={str(super_focus.locked).lower()}')
         
-        tpai_args.append(img_file)
-        print(f'{log_prefix} tpaie.exe args:', pprint.pformat(tpai_args))
+        cmd_args.append(img_file)
+        print(f'{log_prefix} tpaie.exe 参数列表:', pprint.pformat(cmd_args))
         
         # 执行Topaz命令并处理输出
         try:
-            p_tpai = subprocess.run(tpai_args, capture_output=True, text=True, shell=False, encoding='utf-8', errors='ignore')
+            # 正确处理包含空格的路径和参数
+            cmd_parts = []
+            cmd_parts.append(f'"{exe_path}"')  # 将 tpai.exe 路径用引号包裹
+            
+            # 添加其他参数，为包含空格的参数添加引号
+            for arg in cmd_args:
+                if ' ' in str(arg) and not (str(arg).startswith('"') and str(arg).endswith('"')):
+                    cmd_parts.append(f'"{arg}"')
+                else:
+                    cmd_parts.append(str(arg))
+            
+            # 构建最终命令字符串
+            cmd_str = ' '.join(cmd_parts)
+            print(f'{log_prefix} 执行命令: {cmd_str}')
+            
+            # 使用 shell=True 可能有助于处理特殊字符和路径问题
+            p_tpai = subprocess.run(cmd_str, capture_output=True, text=True, shell=True, encoding='utf-8', errors='ignore')
             print(f'{log_prefix} tpaie.exe return code:', p_tpai.returncode)
             print(f'{log_prefix} tpaie.exe STDOUT:', p_tpai.stdout)
             print(f'{log_prefix} tpaie.exe STDERR:', p_tpai.stderr)
@@ -785,18 +802,64 @@ class ComfyTopazPhoto:
                 
                 # 更详细的模型名称提示
                 if upscale and upscale.enabled:
-                    print(f'{log_prefix} 尝试使用的 upscale 模型: {upscale.model}')
-                    print(f'{log_prefix} 建议:')
-                    print(f'{log_prefix}   1. 检查 Topaz Photo AI 是否已安装所有模型')
-                    print(f'{log_prefix}   2. 尝试在 Topaz Photo AI 应用中手动使用这些模型')
-                    print(f'{log_prefix}   3. 启动 Topaz Photo AI GUI 完成一次处理后再尝试')
-                    print(f'{log_prefix}   4. 检查 --upscale 参数对应的确切模型名称')
+                    original_model = upscale.model
+                    print(f'{log_prefix} 尝试使用的 upscale 模型: {original_model}')
+                    print(f'{log_prefix} 建议尝试以下模型名称变体:')
+                    
+                    # 提供不同的模型名称格式建议
+                    model_variants = []
+                    
+                    # 1. 完全匹配 GUI 显示的原始名称
+                    model_variants.append(original_model)
+                    
+                    # 2. 尝试不同的大小写版本
+                    model_variants.append(original_model.lower())
+                    model_variants.append(original_model.upper())
+                    
+                    # 3. 尝试无空格版本
+                    model_variants.append(original_model.replace(" ", ""))
+                    
+                    # 4. 尝试常见标准模型名称
+                    model_variants.append("Standard v2")
+                    model_variants.append("Standard")
+                    model_variants.append("Std v2")
+                    
+                    # 5. 尝试无前缀和有前缀版本
+                    if original_model.startswith("Enhance "):
+                        model_variants.append(original_model[8:])  # 去掉"Enhance "
+                    else:
+                        model_variants.append(f"Enhance {original_model}")
+                    
+                    # 6. 尝试图中显示的所有其他模型
+                    for other_model in ["Standard v2", "Standard v1", "High fidelity v2", "High fidelity v1", "Low resolution", "Graphics"]:
+                        if other_model != original_model and other_model not in model_variants:
+                            model_variants.append(other_model)
+                    
+                    # 打印所有变体建议
+                    print(f'{log_prefix} 建议尝试以下模型名称:')
+                    for i, variant in enumerate(model_variants):
+                        print(f'{log_prefix}   {i+1}. "{variant}"')
+                    
+                    print(f'{log_prefix} 请在 ComfyUI 中修改模型选择，尝试以上名称')
+                    print(f'{log_prefix} 最好使用与 Topaz Photo AI 界面中完全一致的名称')
+                    
+                    print(f'{log_prefix} 其他解决方案:')
+                    print(f'{log_prefix}   1. 打开 Topaz Photo AI GUI 应用，完成一次放大处理，然后关闭')
+                    print(f'{log_prefix}   2. 确保 Topaz Photo AI 应用已完全关闭（检查系统托盘）')
+                    print(f'{log_prefix}   3. 在 Topaz Photo AI 中选择另一个模型（如 "Standard v1" 或 "Graphics"）')
+                    print(f'{log_prefix}   4. 检查模型是否已下载（在 Topaz Photo AI 设置中查看模型）')
+                    print(f'{log_prefix}   5. 重新安装或更新 Topaz Photo AI 到最新版本')
+                
                 if sharpen and sharpen.enabled:
                     print(f'{log_prefix} 尝试使用的 sharpen 模型: {sharpen.model}')
+                    print(f'{log_prefix} 请尝试以下名称变体:')
+                    print(f'{log_prefix}   1. "Sharpen {sharpen.model.replace("Sharpen ", "")}"')
+                    print(f'{log_prefix}   2. "{sharpen.model}"')
+                    print(f'{log_prefix}   3. "Sharpen Standard V2" (默认模型)')
                 
                 # 检查是否可以直接运行 tpai.exe
                 print(f'{log_prefix} 尝试直接使用以下命令测试 Topaz Photo AI:')
-                test_cmd = f'{tpai_exe} --help'
+                test_cmd = f'{exe_path} --help'
                 print(f'{log_prefix} > {test_cmd}')
                 
                 # 检查 Topaz 日志位置
@@ -807,7 +870,8 @@ class ComfyTopazPhoto:
                 print(f'{log_prefix} 如果问题仍然存在，您可以尝试:')
                 print(f'{log_prefix}   1. 确保 Topaz Photo AI 应用程序处于关闭状态')
                 print(f'{log_prefix}   2. 重新安装或更新 Topaz Photo AI')
-                print(f'{log_prefix}   3. 将 upscale.model 设置为 "Standard V2"')
+                print(f'{log_prefix}   3. 将 upscale.model 设置为 "Enhance Standard V2"')
+                print(f'{log_prefix}   4. 如果仍然不起作用，使用 Comfy 原生的放大节点作为替代')
                 
                 raise RuntimeError(error_message)
 
