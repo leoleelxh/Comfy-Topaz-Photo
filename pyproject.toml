@@ -11,4 +11,4 @@ Repository = "https://github.com/leoleelxh/Comfy-Topaz-Photo"
 [tool.comfy]
 PublisherId = "leoleexh"
 DisplayName = "Comfy-Topaz-Photo"
-Icon = ""
+Icon = "https://raw.githubusercontent.com/leoleelxh/Comfy-Topaz-Photo/main/sample.jpg"

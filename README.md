@@ -1,6 +1,6 @@
 # ComfyUI Node for Topaz Photo AI (`ComfyTopazPhoto`)
 
-![]sample.jpg
+![Topaz Photo AI Sample](sample.jpg)
 
 Integrate Topaz Photo AI's powerful image enhancement capabilities directly into your ComfyUI workflows.
 
@@ -26,10 +26,10 @@ This node allows you to call the `tpai.exe` command-line interface from within C
 
 1.  Clone this repository into your `ComfyUI/custom_nodes/` directory:
     ```bash
-    git clone <your-repo-url> ComfyUI/custom_nodes/ComfyTopazPhoto
+    git clone https://github.com/leoleelxh/Comfy-Topaz-Photo
     ```
-    (Replace `<your-repo-url>` with the actual URL of this repository)
-2.  Alternatively, download the repository contents as a ZIP file and extract it into `ComfyUI/custom_nodes/ComfyTopazPhoto`.
+    
+2.  Alternatively, download the repository contents as a ZIP file and extract it into `ComfyUI/custom_nodes/Comfy-Topaz-Photo`.
 3.  **Restart ComfyUI.**
 
 ## 使用流程详解
