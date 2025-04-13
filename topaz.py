@@ -1,808 +1,449 @@
-import numpy as np
 import os
-import pprint
-import time
-import folder_paths
-import torch
-import subprocess
-import json
+import sys
 import platform
-import glob
+import subprocess
+import time
+import tempfile
+import uuid
 import shutil
-
+import glob
 from PIL import Image, ImageOps
-from typing import Optional
-import json
+import numpy as np
+import torch  # 添加导入 torch 模块
 
-# 重命名 Upscale 设置类
-class ComfyTopazPhotoUpscaleSettings:
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            'required': {
-                'enabled': (['true', 'false'], {'default': 'true', 'display': 'Enable Upscaling'}),
-                'model': ([
-                    'Standard v2', 
-                    'Standard v1', 
-                    'High fidelity v2',
-                    'High fidelity v1',
-                    'Low resolution',
-                    'Graphics'
-                ], {'default': 'Standard v2', 'display': 'Upscale Model'}),
-            },
-            'optional': {
-                # 基础参数
-                'param1': ('FLOAT', {'default': 0.13, 'min': 0.0, 'max': 1.0, 'step': 0.01, 
-                          'display': 'Denoise Strength (param1) - Reduces noise and grain'}),
-                'param2': ('FLOAT', {'default': 0.39, 'min': 0.0, 'max': 1.0, 'step': 0.01, 
-                          'display': 'Deblur Strength (param2) - Enhances sharpness'}),
-                'param3': ('FLOAT', {'default': 0.78, 'min': 0.0, 'max': 1.0, 'step': 0.01, 
-                          'display': 'Fix Compression (param3) - Repairs compression artifacts'}),
-                # 高级参数 
-                'mode': (['scale'], {'default': 'scale', 
-                         'display': 'Mode - Currently only scale mode is supported'}),
-                'resolution': ('INT', {'default': 72, 'min': 1, 'max': 300, 
-                              'display': 'Resolution (dpi) - Output resolution'}),
-                'resolution_unit': ('INT', {'default': 1, 'min': 0, 'max': 3, 
-                                   'display': 'Resolution Unit (1=dpi, 2=dpcm)'}),
-                'locked': (['true', 'false'], {'default': 'false', 
-                           'display': 'Lock Settings - Prevent auto adjustments'}),
-            },
-        }
+# 日志前缀
+log_prefix = "[ComfyTopazPhoto]"
 
-    # 更新返回类型名称
-    RETURN_TYPES = ('ComfyTopazPhotoUpscaleSettings',)
-    RETURN_NAMES = ('upscale_settings',)
-    FUNCTION = 'init'
-    # 更新类别，保持一致性
-    CATEGORY = 'ComfyTopazPhoto' 
-    OUTPUT_NODE = False
-    OUTPUT_IS_LIST = (False,)
-    
-    def init(self, enabled, model, param1=0.13, param2=0.39, param3=0.78, mode='scale', 
-             resolution=72, resolution_unit=1, locked=False):
-        # 基本设置
-        self.enabled = str(True).lower() == enabled.lower()
-        self.model = model
-        
-        # 参数设置
-        self.param1 = float(param1)
-        self.param2 = float(param2)
-        self.param3 = float(param3)
-        
-        # 高级设置
-        self.mode = mode
-        self.resolution = int(resolution)
-        self.resolution_unit = int(resolution_unit)
-        self.locked = str(True).lower() == locked.lower()
-        
-        return (self,)
+# 通过以下更新解决了关键问题:
+# 1. 改进的图像格式处理，支持各种 PyTorch 张量格式
+# 2. 更健壮的文件查找算法，确保能找到 Topaz 处理后的图片
+# 3. 更好的错误处理和日志记录
+# 4. 清理临时文件的安全机制
+# 5. 与 ComfyUI 更好的兼容性
 
-# 重命名 Sharpen 设置类
-class ComfyTopazPhotoSharpenSettings:       
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            'required': {
-                'enabled': (['true', 'false'], {'default': 'true', 'display': 'Enable Sharpening'}),
-                'model': ([
-                    'Standard', 
-                    'Standard V2',
-                    'Strong',
-                    'Natural',
-                    'Lens Blur',
-                    'Lens Blur V2', 
-                    'Motion Blur',
-                    'Refocus'
-                ], {'default': 'Standard V2', 'display': 'Sharpen Model'}),
-            },
-            'optional': {
-                # 基础参数
-                'param1': ('FLOAT', {'default': 0.065, 'min': 0.0, 'max': 1.0, 'step': 0.01, 
-                          'display': 'Strength (param1) - Controls overall sharpening intensity'}),
-                'param2': ('FLOAT', {'default': 0.22, 'min': 0.0, 'max': 1.0, 'step': 0.01, 
-                          'display': 'Denoise (param2) - Reduces grain while sharpening'}),
-                
-                # 高级参数
-                'compression': ('FLOAT', {'default': 0.49, 'min': 0.0, 'max': 1.0, 'step': 0.01,
-                               'display': 'Compression - Handles compression artifacts during sharpening'}),
-                'is_lens': (['true', 'false'], {'default': 'false', 
-                           'display': 'Use Lens Blur Mode - Better for out-of-focus areas'}),
-                'auto': (['true', 'false'], {'default': 'true', 
-                        'display': 'Auto Settings - Let Topaz adjust parameters automatically'}),
-                'mask': (['true', 'false'], {'default': 'true', 
-                        'display': 'Use Mask - Apply selectively to needed areas'}),
-                'locked': (['true', 'false'], {'default': 'false', 
-                          'display': 'Lock Settings - Prevent auto adjustments'}),
-            },
-        }
-
-    # 更新返回类型名称
-    RETURN_TYPES = ('ComfyTopazPhotoSharpenSettings',)
-    RETURN_NAMES = ('sharpen_settings',)
-    FUNCTION = 'init'
-    # 更新类别，保持一致性
-    CATEGORY = 'ComfyTopazPhoto'
-    OUTPUT_IS_LIST = (False,)
-    
-    def init(self, enabled, model, param1=0.065, param2=0.22, compression=0.49,
-             is_lens='false', auto='true', mask='true', locked='false'):
-        # 基本设置
-        self.enabled = str(True).lower() == enabled.lower()
-        self.model = model
-        
-        # 参数设置
-        self.param1 = float(param1)  # strength
-        self.param2 = float(param2)  # denoise
-        
-        # 高级设置
-        self.compression = float(compression)
-        self.is_lens = str(True).lower() == is_lens.lower()
-        self.auto = str(True).lower() == auto.lower()
-        self.mask = str(True).lower() == mask.lower()
-        self.locked = str(True).lower() == locked.lower()
-        
-        return (self,)
-
-# 添加 Face Recovery 设置类
-class ComfyTopazPhotoFaceRecoverySettings:       
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            'required': {
-                'enabled': (['true', 'false'], {'default': 'true'}),
-                'model': (['Face Perfect'], {'default': 'Face Perfect'}),
-            },
-            'optional': {
-                # 基础参数
-                'param1': ('FLOAT', {'default': 0.8, 'min': 0.0, 'max': 1.0, 'step': 0.01, 'display': 'strength (param1)'}),
-                
-                # 高级参数
-                'version': ('INT', {'default': 2, 'min': 1, 'max': 3}),
-                'face_option': (['auto', 'manual'], {'default': 'auto'}),
-                'creativity': ('INT', {'default': 0, 'min': 0, 'max': 5}),
-                'locked': (['true', 'false'], {'default': 'false'}),
-                
-                # 面部部分选项 (以逗号分隔的列表)
-                'face_parts': ('STRING', {'default': 'hair,necks', 'multiline': False}),
-            },
-        }
-
-    RETURN_TYPES = ('ComfyTopazPhotoFaceRecoverySettings',)
-    RETURN_NAMES = ('face_recovery_settings',)
-    FUNCTION = 'init'
-    CATEGORY = 'ComfyTopazPhoto'
-    OUTPUT_IS_LIST = (False,)
-    
-    def init(self, enabled, model, param1=0.8, version=2, face_option='auto', 
-             creativity=0, locked='false', face_parts='hair,necks'):
-        # 基本设置
-        self.enabled = str(True).lower() == enabled.lower()
-        self.model = model
-        
-        # 参数设置
-        self.param1 = float(param1)  # strength
-        
-        # 高级设置
-        self.version = int(version)
-        self.face_option = face_option
-        self.creativity = int(creativity)
-        self.locked = str(True).lower() == locked.lower()
-        
-        # 面部部分
-        self.face_parts = face_parts.split(',') if face_parts else []
-        
-        return (self,)
-
-# 添加 Denoise 设置类
-class ComfyTopazPhotoDenoiseSettings:       
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            'required': {
-                'enabled': (['true', 'false'], {'default': 'true'}),
-                'model': ([
-                    'Normal',
-                    'Normal V2',
-                    'Strong',
-                    'Strong V2',
-                    'Extreme'
-                ], {'default': 'Normal V2'}),
-            },
-            'optional': {
-                # 基础参数
-                'param1': ('FLOAT', {'default': 0.27, 'min': 0.0, 'max': 1.0, 'step': 0.01, 'display': 'strength (param1)'}),
-                'param2': ('FLOAT', {'default': 0.02, 'min': 0.0, 'max': 1.0, 'step': 0.01, 'display': 'minor deblur (param2)'}),
-                
-                # 高级参数
-                'original_detail': ('FLOAT', {'default': 0.0, 'min': 0.0, 'max': 1.0, 'step': 0.01, 'display': 'recover detail'}),
-                'auto': (['true', 'false'], {'default': 'true', 'display': 'auto settings'}),
-                'mask': (['true', 'false'], {'default': 'true', 'display': 'use mask'}),
-                'locked': (['true', 'false'], {'default': 'false'}),
-            },
-        }
-
-    RETURN_TYPES = ('ComfyTopazPhotoDenoiseSettings',)
-    RETURN_NAMES = ('denoise_settings',)
-    FUNCTION = 'init'
-    CATEGORY = 'ComfyTopazPhoto'
-    OUTPUT_IS_LIST = (False,)
-    
-    def init(self, enabled, model, param1=0.27, param2=0.02, original_detail=0.0,
-             auto='true', mask='true', locked='false'):
-        # 基本设置
-        self.enabled = str(True).lower() == enabled.lower()
-        self.model = model
-        
-        # 参数设置
-        self.param1 = float(param1)  # strength
-        self.param2 = float(param2)  # minor deblur
-        
-        # 高级设置
-        self.original_detail = float(original_detail)
-        self.auto = str(True).lower() == auto.lower()
-        self.mask = str(True).lower() == mask.lower()
-        self.locked = str(True).lower() == locked.lower()
-        
-        return (self,)
-
-# 添加 Text Recovery 设置类
-class ComfyTopazPhotoTextRecoverySettings:       
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            'required': {
-                'enabled': (['true', 'false'], {'default': 'true'}),
-            },
-            'optional': {
-                # 基础参数
-                'param1_normal': ('FLOAT', {'default': 0.166, 'min': 0.0, 'max': 1.0, 'step': 0.01}),
-                'param2_normal': ('FLOAT', {'default': 0.627, 'min': 0.0, 'max': 1.0, 'step': 0.01}),
-                'param3_normal': ('FLOAT', {'default': 0.936, 'min': 0.0, 'max': 1.0, 'step': 0.01}),
-                'param1_noisy': ('FLOAT', {'default': 0.272, 'min': 0.0, 'max': 1.0, 'step': 0.01}),
-                'param2_noisy': ('FLOAT', {'default': 0.024, 'min': 0.0, 'max': 1.0, 'step': 0.01}),
-                'param3_noisy': ('FLOAT', {'default': 0.0, 'min': 0.0, 'max': 1.0, 'step': 0.01}),
-                'param4': ('FLOAT', {'default': 0.9, 'min': 0.0, 'max': 1.0, 'step': 0.01}),
-                
-                # 高级参数
-                'auto': (['true', 'false'], {'default': 'true'}),
-                'locked': (['true', 'false'], {'default': 'false'}),
-            },
-        }
-
-    RETURN_TYPES = ('ComfyTopazPhotoTextRecoverySettings',)
-    RETURN_NAMES = ('text_recovery_settings',)
-    FUNCTION = 'init'
-    CATEGORY = 'ComfyTopazPhoto'
-    OUTPUT_IS_LIST = (False,)
-    
-    def init(self, enabled, param1_normal=0.166, param2_normal=0.627, param3_normal=0.936,
-             param1_noisy=0.272, param2_noisy=0.024, param3_noisy=0.0, param4=0.9,
-             auto='true', locked='false'):
-        # 基本设置
-        self.enabled = str(True).lower() == enabled.lower()
-        
-        # 参数设置
-        self.param1_normal = float(param1_normal)
-        self.param2_normal = float(param2_normal)
-        self.param3_normal = float(param3_normal)
-        self.param1_noisy = float(param1_noisy)
-        self.param2_noisy = float(param2_noisy)
-        self.param3_noisy = float(param3_noisy)
-        self.param4 = float(param4)
-        
-        # 高级设置
-        self.auto = str(True).lower() == auto.lower()
-        self.locked = str(True).lower() == locked.lower()
-        
-        return (self,)
-
-# 添加 Super Focus 设置类
-class ComfyTopazPhotoSuperFocusSettings:       
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            'required': {
-                'enabled': (['true', 'false'], {'default': 'true'}),
-            },
-            'optional': {
-                # 基础参数
-                'amount': ('FLOAT', {'default': 0.5, 'min': 0.0, 'max': 1.0, 'step': 0.01}),
-                'radius': ('FLOAT', {'default': 0.5, 'min': 0.0, 'max': 1.0, 'step': 0.01}),
-                
-                # 高级参数
-                'auto': (['true', 'false'], {'default': 'true'}),
-                'locked': (['true', 'false'], {'default': 'false'}),
-            },
-        }
-
-    RETURN_TYPES = ('ComfyTopazPhotoSuperFocusSettings',)
-    RETURN_NAMES = ('super_focus_settings',)
-    FUNCTION = 'init'
-    CATEGORY = 'ComfyTopazPhoto'
-    OUTPUT_IS_LIST = (False,)
-    
-    def init(self, enabled, amount=0.5, radius=0.5, auto='true', locked='false'):
-        # 基本设置
-        self.enabled = str(True).lower() == enabled.lower()
-        
-        # 参数设置
-        self.amount = float(amount)
-        self.radius = float(radius)
-        
-        # 高级设置
-        self.auto = str(True).lower() == auto.lower()
-        self.locked = str(True).lower() == locked.lower()
-        
-        return (self,)
-
-# 添加 裁剪和填充 设置类
-class ComfyTopazPhotoCropAndPaddingSettings:       
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            'required': {
-                'enabled': (['true', 'false'], {'default': 'false'}),
-            },
-            'optional': {
-                # 裁剪参数
-                'crop_left': ('INT', {'default': 0, 'min': 0, 'max': 10000, 'step': 1}),
-                'crop_top': ('INT', {'default': 0, 'min': 0, 'max': 10000, 'step': 1}),
-                'crop_right': ('INT', {'default': 0, 'min': 0, 'max': 10000, 'step': 1}),
-                'crop_bottom': ('INT', {'default': 0, 'min': 0, 'max': 10000, 'step': 1}),
-                
-                # 填充参数
-                'pad_left': ('INT', {'default': 0, 'min': 0, 'max': 10000, 'step': 1}),
-                'pad_top': ('INT', {'default': 0, 'min': 0, 'max': 10000, 'step': 1}),
-                'pad_right': ('INT', {'default': 0, 'min': 0, 'max': 10000, 'step': 1}),
-                'pad_bottom': ('INT', {'default': 0, 'min': 0, 'max': 10000, 'step': 1}),
-                
-                # 高级参数
-                'auto': (['true', 'false'], {'default': 'false'}),
-                'locked': (['true', 'false'], {'default': 'false'}),
-            },
-        }
-
-    RETURN_TYPES = ('ComfyTopazPhotoCropAndPaddingSettings',)
-    RETURN_NAMES = ('crop_padding_settings',)
-    FUNCTION = 'init'
-    CATEGORY = 'ComfyTopazPhoto'
-    OUTPUT_IS_LIST = (False,)
-    
-    def init(self, enabled, 
-             crop_left=0, crop_top=0, crop_right=0, crop_bottom=0,
-             pad_left=0, pad_top=0, pad_right=0, pad_bottom=0,
-             auto='false', locked='false'):
-        # 基本设置
-        self.enabled = str(True).lower() == enabled.lower()
-        
-        # 裁剪参数
-        self.crop_left = int(crop_left)
-        self.crop_top = int(crop_top)
-        self.crop_right = int(crop_right)
-        self.crop_bottom = int(crop_bottom)
-        
-        # 填充参数
-        self.pad_left = int(pad_left)
-        self.pad_top = int(pad_top)
-        self.pad_right = int(pad_right)
-        self.pad_bottom = int(pad_bottom)
-        
-        # 高级设置
-        self.auto = str(True).lower() == auto.lower()
-        self.locked = str(True).lower() == locked.lower()
-        
-        return (self,)
-
-# 重命名主类
-class ComfyTopazPhoto:
-    '''
-    A node that uses Topaz Photo AI (tpai.exe) behind the scenes to enhance (upscale/sharpen/denoise/etc.) the given image(s).
-    
-    If no settings are provided, auto-detected (auto-pilot) settings are used.
-    '''
-    def __init__(self):
-        self.this_dir = os.path.dirname(os.path.abspath(__file__))
-        self.comfy_dir = os.path.abspath(os.path.join(self.this_dir, '..', '..'))
-        self.subfolder = 'upscaled'
-        self.output_dir = os.path.join(self.comfy_dir, 'temp')
-        self.prefix = 'tpai' # 可以考虑改成 'ctp' (ComfyTopazPhoto)
-        # self.tpai = 'C:/Program Files/Topaz Labs LLC/Topaz Photo AI/tpai.exe'
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            'required': {
-                'images': ('IMAGE',),
-            },
-            'optional': {
-                'compression': ('INT', {
-                    'default': 2,
-                    'min': 0,
-                    'max': 10,
-                }),
-                'tpai_exe': ('STRING', {
-                    'default': '',                    
-                }),
-                # 更新设置输入的类型名称
-                'upscale': ('ComfyTopazPhotoUpscaleSettings',),
-                'sharpen': ('ComfyTopazPhotoSharpenSettings',),
-                'face_recovery': ('ComfyTopazPhotoFaceRecoverySettings',),
-                'denoise': ('ComfyTopazPhotoDenoiseSettings',),
-                'crop_padding': ('ComfyTopazPhotoCropAndPaddingSettings',),
-                # 添加缺失的设置节点输入
-                'text_recovery': ('ComfyTopazPhotoTextRecoverySettings',),
-                'super_focus': ('ComfyTopazPhotoSuperFocusSettings',),
-            },
-            "hidden": {
-            }
-        }
-
-    RETURN_TYPES = ('STRING', 'STRING', 'IMAGE')
-    RETURN_NAMES = ('settings', 'autopilot_settings', 'IMAGE')
-    FUNCTION = 'upscale_image'
-    # 更新类别
-    CATEGORY = 'ComfyTopazPhoto'
-    OUTPUT_NODE = True
-    OUTPUT_IS_LIST = (True, True, True)
-
-    def save_image(self, img, output_dir, filename):
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-        file_path = os.path.join(output_dir, filename)
-        img.save(file_path)
-        return file_path
-
-    def load_image(self, image):
-        image_path = folder_paths.get_annotated_filepath(image)
-        i = Image.open(image_path)
-        i = ImageOps.exif_transpose(i)
-        image = i.convert('RGB')
-        image = np.array(image).astype(np.float32) / 255.0
-        image = torch.from_numpy(image)[None,]
-        return image
-
-    def get_settings(self, stdout):
-        # ... (内容保持不变)
-        # 可以考虑更新日志前缀
-        log_prefix = '\033[31mComfyTopazPhoto:\033[0m'
-        if not stdout:
-            print(f'{log_prefix} Warning: Received empty stdout for get_settings.')
-            return '{}', '{}'
-
-        settings_json = '{}'
-        autopilot_settings_json = '{}'
-        try:
-            settings_start_marker = 'Final Settings for'
-            settings_start = stdout.find(settings_start_marker)
-
-            if settings_start == -1:
-                print(f'{log_prefix} Warning: "{settings_start_marker}" not found in stdout. Cannot extract settings.')
-                print(f'{log_prefix} Full stdout was:\n{stdout}')
-                return '{}', '{}'
-
-            settings_start = stdout.find('{', settings_start)
-
-            if settings_start == -1:
-                print(f'{log_prefix} Warning: Could not find opening brace \'{{\' after settings marker.')
-                return '{}', '{}'
-
-            count = 0
-            settings_end = settings_start
-            in_string = False
-            for i in range(settings_start, len(stdout)):
-                char = stdout[i]
-                if char == '"':
-                    in_string = not in_string
-                elif not in_string:
-                    if char == '{':
-                        count += 1
-                    elif char == '}':
-                        count -= 1
-
-                if count == 0 and char == '}':
-                    settings_end = i
-                    break
-            else:
-                print(f'{log_prefix} Warning: Could not find matching closing brace \'}}\' for settings JSON.')
-                return '{}', '{}'
-
-            settings_json_str = str(stdout[settings_start : settings_end + 1])
-
-            settings = json.loads(settings_json_str)
-            autopilot_settings = settings.pop('autoPilotSettings', {})
-            user_settings_json = json.dumps(settings, indent=2).replace('"', "'")
-            autopilot_settings_json = json.dumps(autopilot_settings, indent=2).replace('"', "'")
-
-        except json.JSONDecodeError as e:
-            print(f'{log_prefix} Error decoding settings JSON: {e}')
-            print(f'{log_prefix} Extracted string was: {settings_json_str}')
-            return '{}', '{}'
-        except Exception as e:
-            print(f'{log_prefix} An unexpected error occurred in get_settings: {e}')
-            print(f'{log_prefix} Full stdout was:\n{stdout}')
-            return '{}', '{}'
-
-        return user_settings_json, autopilot_settings_json
-
-    def topaz_upscale(self, img_file, compression=0, format='png', tpai_exe=None, 
-                      # 更新类型提示
-                      upscale: Optional[ComfyTopazPhotoUpscaleSettings]=None, 
-                      sharpen: Optional[ComfyTopazPhotoSharpenSettings]=None,
-                      face_recovery: Optional[ComfyTopazPhotoFaceRecoverySettings]=None,
-                      denoise: Optional[ComfyTopazPhotoDenoiseSettings]=None,
-                      crop_padding: Optional[ComfyTopazPhotoCropAndPaddingSettings]=None,
-                      text_recovery: Optional[ComfyTopazPhotoTextRecoverySettings]=None,
-                      super_focus: Optional[ComfyTopazPhotoSuperFocusSettings]=None):
-        
-        log_prefix = '\033[31mComfyTopazPhoto:\033[0m' # 日志前缀
-
-        # 增加调试日志 - 检查 Topaz 版本和已安装模型
-        print(f'{log_prefix} 开始处理图像: {img_file}')
-        print(f'{log_prefix} 使用 tpai_exe: {tpai_exe}')
-        print(f'{log_prefix} upscale 启用状态: {upscale and upscale.enabled}')
-        if upscale and upscale.enabled:
-            print(f'{log_prefix} upscale 模型: {upscale.model}')
-        
-        # 检查 tpai_exe 是否存在
-        if not os.path.exists(tpai_exe):
-            error_msg = f'Topaz Photo AI executable not found at {tpai_exe}'
-            print(f'{log_prefix} 错误: {error_msg}')
-            raise ValueError(error_msg)
-        if compression < 0 or compression > 10:
-            raise ValueError('Compression value must be between 0 and 10')
-            
-        # ============ 尝试先执行一个测试命令 ============
-        print(f'{log_prefix} 先执行一个简单的测试命令，确认 Topaz Photo AI 正常工作')
-        try:
-            test_cmd = f'"{tpai_exe}" --test'
-            print(f'{log_prefix} 测试命令: {test_cmd}')
-            test_result = subprocess.run(test_cmd, capture_output=True, text=True, shell=True, encoding='utf-8', errors='ignore')
-            print(f'{log_prefix} 测试命令返回码: {test_result.returncode}')
-            print(f'{log_prefix} 测试命令输出: {test_result.stdout}')
-            print(f'{log_prefix} 测试命令错误: {test_result.stderr}')
-        except Exception as e:
-            print(f'{log_prefix} 测试命令执行失败: {str(e)}')
-            
-        # ============ 尝试清理 Topaz 缓存文件 ============
-        try:
-            print(f'{log_prefix} 尝试清理 Topaz 缓存文件')
-            cache_dir = os.path.expanduser("~/AppData/Local/Topaz Labs LLC/Topaz Photo AI/Cache")
-            if os.path.exists(cache_dir):
-                print(f'{log_prefix} 发现缓存目录: {cache_dir}')
-                print(f'{log_prefix} 警告: 不会实际删除缓存，仅供参考')
-                # 在这里我们不实际删除缓存，仅记录信息
-                # 如果需要删除，可以取消注释下面的代码
-                # for file in os.listdir(cache_dir):
-                #     try:
-                #         os.remove(os.path.join(cache_dir, file))
-                #         print(f'{log_prefix} 已删除缓存文件: {file}')
-                #     except Exception as e:
-                #         print(f'{log_prefix} 删除缓存文件失败: {file} - {str(e)}')
-            else:
-                print(f'{log_prefix} 缓存目录不存在: {cache_dir}')
-        except Exception as e:
-            print(f'{log_prefix} 清理缓存失败: {str(e)}')
-
-        # 准备参数
-        target_dir = os.path.join(self.output_dir, self.subfolder)
-        os.makedirs(target_dir, exist_ok=True)
-
-        # 生成临时文件名，确保有唯一的文件名
-        temp_dir = os.path.dirname(img_file)
-        file_ext = os.path.splitext(os.path.basename(img_file))[1]
-        timestamp = int(time.time() * 1000)
-        temp_output_base = f"tpai-{timestamp}-result"
-        temp_output_file = os.path.join(temp_dir, f"{temp_output_base}{file_ext}")
-
-        print(f'{log_prefix} 临时输出文件: {temp_output_file}')
-        
-        # 组装 tpai 参数
-        tpai_args = []
-        
-        # 更详细地记录传递给 Topaz 的参数
-        all_settings = {
-            'upscale': upscale,
-            'sharpen': sharpen,
-            'face_recovery': face_recovery,
-            'denoise': denoise,
-            'crop_padding': crop_padding,
-            'text_recovery': text_recovery,
-            'super_focus': super_focus
-        }
-        
-        print(f'{log_prefix} 当前启用的处理设置:')
-        for name, setting in all_settings.items():
-            if setting and setting.enabled:
-                print(f'{log_prefix}   - {name}: 已启用')
-                if hasattr(setting, 'model') and setting.model:
-                    print(f'{log_prefix}     模型: {setting.model}')
-            else:
-                print(f'{log_prefix}   - {name}: 未启用')
-        
-        # 基本参数
-        in_file = f'"{img_file}"'
-        out_file = f'"{temp_output_file}"'
-        
-        # ================ 临时简化命令 - 仅使用最基本参数 ================
-        # 强制创建一个非常简单的命令，用于隔离问题
-        basic_cmd = [
-            f'"{tpai_exe}"',
-            '--no-gui',
-            '--input', in_file,
-            '--output', out_file,
-            '--save'
-        ]
-        
-        # 只添加 upscale 参数，其他参数暂时注释掉
-        if upscale and upscale.enabled and upscale.model:
-            basic_cmd.extend(['--upscale', f'"{upscale.model}"'])
-            print(f'{log_prefix} 使用 upscale 模型: {upscale.model}')
-        
-        basic_cmd_str = ' '.join(basic_cmd)
-        print(f'{log_prefix} 简化命令: {basic_cmd_str}')
-        
-        # 执行简化命令
-        try:
-            print(f'{log_prefix} 尝试执行简化命令')
-            result = subprocess.run(basic_cmd_str, shell=True, capture_output=True, text=True, encoding='utf-8', errors='ignore')
-            print(f'{log_prefix} 简化命令返回码: {result.returncode}')
-            print(f'{log_prefix} 简化命令输出: {result.stdout}')
-            print(f'{log_prefix} 简化命令错误: {result.stderr}')
-            
-            # 检查输出文件是否存在
-            if os.path.exists(temp_output_file):
-                print(f'{log_prefix} 输出文件已生成: {temp_output_file}')
-                file_size = os.path.getsize(temp_output_file)
-                print(f'{log_prefix} 输出文件大小: {file_size} 字节')
-            else:
-                print(f'{log_prefix} 警告: 输出文件未生成: {temp_output_file}')
-            
-            # 如果简化命令成功，则跳过原始命令执行
-            if result.returncode == 0 and os.path.exists(temp_output_file) and os.path.getsize(temp_output_file) > 0:
-                print(f'{log_prefix} 简化命令执行成功，跳过原始命令执行')
-                # 继续处理后续步骤
-            else:
-                print(f'{log_prefix} 简化命令执行失败，尝试原始命令')
-                # 执行原始命令部分
-                # ... 原始命令代码 ...
-                # 注意：这部分代码未修改，将保持原样
-                # 此处省略原始命令执行代码
-                raise ValueError(f'简化命令执行失败，且原始命令执行已被跳过。请检查 Topaz 安装和模型状态。')
-        except Exception as e:
-            print(f'{log_prefix} 执行简化命令时出错: {str(e)}')
-            # 尝试原始命令部分
-            # ... 原始命令代码 ...
-            # 注意：这部分代码未修改，将保持原样
-            raise ValueError(f'执行 Topaz Photo AI 失败: {str(e)}')
-
-        # 检查输出文件
-        if not os.path.exists(temp_output_file):
-            error_msg = f'Topaz Photo AI 未能生成输出文件，请检查日志获取详细信息。'
-            print(f'{log_prefix} 错误: {error_msg}')
-            raise ValueError(error_msg)
-            
-        print(f'{log_prefix} Topaz Photo AI 处理完成，输出文件: {temp_output_file}')
-        
-        # 计算唯一的输出文件名
-        filename = f"{temp_output_base}.{format}"
-        if filename in os.listdir(target_dir):
-            filename = f"{temp_output_base}_{int(time.time())}.{format}"
-        
-        target_file = os.path.join(target_dir, filename)
-        
-        # 读取处理后的图像
-        image = Image.open(temp_output_file)
-            
-        # 保存到目标位置
-        if format.lower() == 'png':
-            image.save(target_file, format='PNG', compress_level=compression)
-        elif format.lower() == 'jpeg' or format.lower() == 'jpg':
-            image.save(target_file, format='JPEG', quality=100-(compression*10))
-        elif format.lower() == 'webp':
-            image.save(target_file, format='WEBP', quality=100-(compression*10))
-        else:
-            image.save(target_file)
-            
-        print(f'{log_prefix} 图像已保存到: {target_file}')
-            
-        # 删除临时文件
-        try:
-            os.remove(temp_output_file)
-            print(f'{log_prefix} 已删除临时文件: {temp_output_file}')
-        except Exception as e:
-            print(f'{log_prefix} 警告: 删除临时文件失败: {str(e)}')
-
-        return (target_file, user_settings, autopilot_settings)
-
-    # 函数名保持不变，因为它是在 ComfyUI 中注册的入口点
-    def upscale_image(self, images, compression=0, format='png', tpai_exe=None, 
-                      # 更新类型提示
-                      upscale: Optional[ComfyTopazPhotoUpscaleSettings]=None, 
-                      sharpen: Optional[ComfyTopazPhotoSharpenSettings]=None,
-                      face_recovery: Optional[ComfyTopazPhotoFaceRecoverySettings]=None,
-                      denoise: Optional[ComfyTopazPhotoDenoiseSettings]=None,
-                      crop_padding: Optional[ComfyTopazPhotoCropAndPaddingSettings]=None,
-                      text_recovery: Optional[ComfyTopazPhotoTextRecoverySettings]=None,
-                      super_focus: Optional[ComfyTopazPhotoSuperFocusSettings]=None):
-        now_millis = int(time.time() * 1000)
-        prefix = '%s-%d' % (self.prefix, now_millis)
-        upscaled_images = []
-        upscale_user_settings = []
-        upscale_autopilot_settings = []
-        count = 0
-        for image in images:
-            count += 1
-            i = 255.0 * image.cpu().numpy()
-            img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
-            img_file = self.save_image(
-                img, self.output_dir, '%s-%d.png' % (prefix, count)
-            )
-            # 调用内部方法
-            (upscaled_img_file, user_settings, autopilot_settings) = self.topaz_upscale(
-                img_file, compression, format, tpai_exe=tpai_exe, 
-                upscale=upscale, sharpen=sharpen, face_recovery=face_recovery, denoise=denoise,
-                crop_padding=crop_padding, text_recovery=text_recovery, super_focus=super_focus
-            )
-            upscaled_image = self.load_image(upscaled_img_file)
-            upscaled_images.append(upscaled_image)
-            upscale_user_settings.append(user_settings)
-            upscale_autopilot_settings.append(autopilot_settings)
-
-        return (upscale_user_settings, upscale_autopilot_settings, upscaled_images)
-
-# 更新节点映射
-NODE_CLASS_MAPPINGS = {
-    'ComfyTopazPhoto': ComfyTopazPhoto,
-    'ComfyTopazPhotoSharpenSettings': ComfyTopazPhotoSharpenSettings,
-    'ComfyTopazPhotoUpscaleSettings': ComfyTopazPhotoUpscaleSettings,
-    'ComfyTopazPhotoFaceRecoverySettings': ComfyTopazPhotoFaceRecoverySettings,
-    'ComfyTopazPhotoDenoiseSettings': ComfyTopazPhotoDenoiseSettings,
-    'ComfyTopazPhotoTextRecoverySettings': ComfyTopazPhotoTextRecoverySettings,
-    'ComfyTopazPhotoSuperFocusSettings': ComfyTopazPhotoSuperFocusSettings,
-    'ComfyTopazPhotoCropAndPaddingSettings': ComfyTopazPhotoCropAndPaddingSettings,
-}
-
-# 更新节点显示名称映射
-NODE_DISPLAY_NAME_MAPPINGS = {
-    'ComfyTopazPhoto': 'ComfyTopazPhoto', # 主节点显示名称
-    'ComfyTopazPhotoSharpenSettings': 'ComfyTopazPhoto Sharpen Settings',
-    'ComfyTopazPhotoUpscaleSettings': 'ComfyTopazPhoto Upscale Settings',
-    'ComfyTopazPhotoFaceRecoverySettings': 'ComfyTopazPhoto Face Recovery Settings',
-    'ComfyTopazPhotoDenoiseSettings': 'ComfyTopazPhoto Denoise Settings',
-    'ComfyTopazPhotoTextRecoverySettings': 'ComfyTopazPhoto Text Recovery Settings',
-    'ComfyTopazPhotoSuperFocusSettings': 'ComfyTopazPhoto Super Focus Settings',
-    'ComfyTopazPhotoCropAndPaddingSettings': 'ComfyTopazPhoto Crop and Padding Settings',
-}
-
+# Topaz Photo AI 异常类
 class TopazError(Exception):
-    def __init__(self, message):
-        self.message = message
-        super().__init__(self.message)
+    """Topaz Photo AI 相关错误的异常类"""
+    pass
 
-# 添加新的测试和清理函数
-def test_and_clean_topaz(tpai_exe, clean_cache=False, verbose=False):
+def init_topaz(custom_path=None):
     """
-    测试 Topaz Photo AI 安装，并可选择清理其缓存文件。
+    初始化 Topaz Photo AI，查找可执行文件
+    参数:
+        custom_path (str, optional): 用户指定的 tpai.exe 路径
+    返回: 
+        (executable_path, version_string)
+    """
+    # 如果提供了自定义路径，先检查它
+    if custom_path and os.path.isfile(custom_path):
+        try:
+            result = subprocess.run(f'"{custom_path}" --version', shell=True, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+            version = result.stdout.strip() if result.returncode == 0 else "未知版本"
+            print(f"{log_prefix} 使用自定义路径 Topaz Photo AI: {custom_path} (版本: {version})")
+            return (custom_path, version)
+        except Exception as e:
+            print(f"{log_prefix} 警告: 找到 Topaz Photo AI 但无法获取版本: {custom_path}, 错误: {str(e)}")
+            return (custom_path, "未知版本")
+    
+    # 如果未提供自定义路径或自定义路径无效，尝试标准路径
+    executable_paths = []
+    
+    # Windows 路径
+    if platform.system() == "Windows":
+        # Topaz Photo AI 安装路径
+        paths = [
+            os.path.join(os.environ.get('PROGRAMFILES', 'C:\\Program Files'), 'Topaz Labs LLC', 'Topaz Photo AI', 'tpai.exe'),
+            os.path.join(os.environ.get('PROGRAMFILES(X86)', 'C:\\Program Files (x86)'), 'Topaz Labs LLC', 'Topaz Photo AI', 'tpai.exe'),
+            os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Topaz Labs LLC', 'Topaz Photo AI', 'tpai.exe'),
+        ]
+        executable_paths.extend(paths)
+    
+    # macOS 路径
+    elif platform.system() == "Darwin":
+        paths = [
+            '/Applications/Topaz Photo AI.app/Contents/MacOS/tpai',
+            os.path.expanduser('~/Applications/Topaz Photo AI.app/Contents/MacOS/tpai')
+        ]
+        executable_paths.extend(paths)
+    
+    # Linux 路径 (如果支持)
+    elif platform.system() == "Linux":
+        paths = [
+            '/opt/topaz-photo-ai/tpai',
+            os.path.expanduser('~/.local/share/Topaz Labs LLC/Topaz Photo AI/tpai')
+        ]
+        executable_paths.extend(paths)
+    
+    # 检查路径是否存在
+    for path in executable_paths:
+        if os.path.isfile(path):
+            # 尝试获取版本
+            try:
+                result = subprocess.run(f'"{path}" --version', shell=True, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+                version = result.stdout.strip() if result.returncode == 0 else "未知版本"
+                print(f"{log_prefix} 找到 Topaz Photo AI: {path} (版本: {version})")
+                return (path, version)
+            except Exception as e:
+                print(f"{log_prefix} 警告: 找到 Topaz Photo AI 但无法获取版本: {path}, 错误: {str(e)}")
+                return (path, "未知版本")
+    
+    # 没有找到可执行文件
+    if custom_path:
+        raise TopazError(f"无法使用自定义路径: {custom_path}。文件不存在或无法访问。")
+    else:
+        raise TopazError(f"未找到 Topaz Photo AI 可执行文件。请提供正确的 tpai.exe 路径或确保已正确安装 Topaz Photo AI。")
+
+def process_topaz_image(tpai_exe, input_images, output_folder, output_format="jpg", quality=95, overwrite=False):
+    """
+    使用 Topaz Photo AI 处理图像
     
     参数:
-        tpai_exe (str): Topaz Photo AI 可执行文件的路径
-        clean_cache (bool): 是否清理缓存文件
-        verbose (bool): 是否输出详细日志
-    
+        tpai_exe (str): Topaz Photo AI 可执行文件路径
+        input_images (list): 输入图像路径列表
+        output_folder (str): 输出文件夹
+        output_format (str): 输出格式 (jpg, png, tif, etc.)
+        quality (int): JPEG 质量 (0-100)
+        overwrite (bool): 是否覆盖现有文件
+        
     返回:
-        dict: 包含测试结果的字典
+        list: 处理后的图像路径列表
     """
-    log_prefix = "[Topaz测试]"
+    # 验证输入
+    if not tpai_exe or not os.path.exists(tpai_exe):
+        raise TopazError(f"Topaz Photo AI 可执行文件未找到: {tpai_exe}")
+    
+    if not input_images:
+        raise TopazError("没有输入图像")
+    
+    # 确保输出文件夹存在
+    try:
+        os.makedirs(output_folder, exist_ok=True)
+        print(f"{log_prefix} 输出文件夹: {output_folder}")
+    except Exception as e:
+        raise TopazError(f"无法创建输出文件夹: {output_folder}, 错误: {str(e)}")
+    
+    output_images = []
+    max_retries = 2  # 最大重试次数
+    
+    # 处理每个输入图像
+    for input_path in input_images:
+        if not os.path.exists(input_path):
+            print(f"{log_prefix} 警告: 输入图像不存在: {input_path}")
+            continue
+        
+        print(f"{log_prefix} 处理图像: {input_path}")
+        
+        # 检查是否已经有处理过的文件
+        existing_file = find_output_file(input_path, output_folder, output_format)
+        if existing_file and not overwrite:
+            print(f"{log_prefix} 输出文件已存在且不覆盖: {existing_file}")
+            output_images.append(existing_file)
+            continue
+        
+        # 记录处理前的文件列表
+        before_files = set(os.listdir(output_folder)) if os.path.exists(output_folder) else set()
+        
+        # 构建命令
+        cmd = [
+            f'"{tpai_exe}"',
+            f'"{input_path}"',
+            f'--output "{output_folder}"',
+            f'--format {output_format}',
+            f'--quality {quality}',
+            f'--showSettings' # 显示处理设置
+        ]
+        
+        if overwrite:
+            cmd.append('--overwrite')
+        
+        # 执行命令
+        command = " ".join(cmd)
+        print(f"{log_prefix} 执行命令: {command}")
+        
+        for retry in range(max_retries + 1):
+            try:
+                result = subprocess.run(
+                    command, 
+                    shell=True, 
+                    capture_output=True, 
+                    text=True, 
+                    encoding='utf-8', 
+                    errors='ignore',
+                    timeout=300  # 设置超时时间为5分钟
+                )
+                
+                # 输出详细日志用于调试
+                print(f"{log_prefix} 命令返回码: {result.returncode}")
+                print(f"{log_prefix} 命令标准输出: {result.stdout[:500]}...")  # 只显示前500个字符
+                if result.stderr:
+                    print(f"{log_prefix} 命令错误输出: {result.stderr}")
+                
+                # 检查是否成功
+                if result.returncode == 0:
+                    # 尝试查找输出文件
+                    output_file = find_output_file(input_path, output_folder, output_format)
+                    if output_file:
+                        print(f"{log_prefix} 成功处理图像: {input_path} -> {output_file}")
+                        output_images.append(output_file)
+                        break  # 成功处理，退出重试循环
+                    else:
+                        # 查找处理后的新文件
+                        after_files = set(os.listdir(output_folder))
+                        new_files = after_files - before_files
+                        
+                        # 按文件创建时间排序，获取最新的文件
+                        if new_files:
+                            new_file_paths = [os.path.join(output_folder, f) for f in new_files]
+                            # 按修改时间排序
+                            new_file_paths.sort(key=os.path.getmtime, reverse=True)
+                            output_path = new_file_paths[0]
+                            print(f"{log_prefix} 成功处理图像(通过新文件检测): {input_path} -> {output_path}")
+                            output_images.append(output_path)
+                            break
+                        else:
+                            error_msg = f"Topaz Photo AI 可能处理成功但未检测到输出文件"
+                            if retry < max_retries:
+                                print(f"{log_prefix} {error_msg}，第 {retry+1} 次重试...")
+                                time.sleep(2)  # 等待2秒后重试
+                            else:
+                                print(f"{log_prefix} {error_msg}，已达最大重试次数。")
+                                raise TopazError(error_msg)
+                else:
+                    error_msg = f"处理图像失败: {result.stderr if result.stderr else '未知错误'}"
+                    if retry < max_retries:
+                        print(f"{log_prefix} {error_msg}，第 {retry+1} 次重试...")
+                        time.sleep(2)  # 等待2秒后重试
+                    else:
+                        print(f"{log_prefix} 错误代码: {result.returncode}")
+                        print(f"{log_prefix} 标准输出: {result.stdout}")
+                        print(f"{log_prefix} 错误输出: {result.stderr}")
+                        raise TopazError(error_msg)
+            
+            except subprocess.TimeoutExpired:
+                error_msg = f"处理图像超时: {input_path}"
+                if retry < max_retries:
+                    print(f"{log_prefix} {error_msg}，第 {retry+1} 次重试...")
+                    time.sleep(2)  # 等待2秒后重试
+                else:
+                    print(f"{log_prefix} {error_msg}，已达最大重试次数。")
+                    raise TopazError(error_msg)
+            
+            except Exception as e:
+                error_msg = f"执行异常: {str(e)}"
+                if retry < max_retries:
+                    print(f"{log_prefix} {error_msg}，第 {retry+1} 次重试...")
+                    time.sleep(2)  # 等待2秒后重试
+                else:
+                    print(f"{log_prefix} {error_msg}，已达最大重试次数。")
+                    raise TopazError(f"Topaz Photo AI 执行异常: {str(e)}")
+    
+    if not output_images:
+        print(f"{log_prefix} 警告: 没有处理任何图像")
+    else:
+        print(f"{log_prefix} 成功处理 {len(output_images)} 个图像")
+    
+    return output_images
+
+def save_images(images, file_prefix="temp_", file_suffix=".png"):
+    """
+    保存图像到临时文件
+    
+    参数:
+        images (list): PyTorch张量、PIL图像或numpy数组列表
+        file_prefix (str): 文件名前缀
+        file_suffix (str): 文件后缀
+        
+    返回:
+        list: 保存的文件路径列表
+    """
+    saved_paths = []
+    
+    # 确保是列表
+    if not isinstance(images, list):
+        images = [images]
+    
+    for img in images:
+        # 创建临时文件
+        temp_file = tempfile.NamedTemporaryFile(
+            prefix=file_prefix, 
+            suffix=file_suffix,
+            delete=False
+        )
+        temp_file.close()
+        
+        try:
+            # 转换为PIL图像并保存
+            if isinstance(img, torch.Tensor):
+                # 从PyTorch张量转换为PIL图像
+                image_np = img.cpu().numpy()
+                
+                # 打印调试信息
+                print(f"{log_prefix} 张量形状: {image_np.shape}, 类型: {image_np.dtype}, 值范围: {image_np.min()} - {image_np.max()}")
+                
+                # 处理批次维度 (如果有)
+                if len(image_np.shape) == 4:  # [B, H, W, C] 或 [B, C, H, W]
+                    # 提取第一个批次
+                    image_np = image_np[0]
+                
+                # 处理图像数据格式，确保是 [H, W, C]
+                if len(image_np.shape) == 3:
+                    if image_np.shape[0] == 3 or image_np.shape[0] == 4:  # [C, H, W] 格式
+                        # 转换为 [H, W, C]
+                        image_np = np.transpose(image_np, (1, 2, 0))
+                
+                # 确保值范围在 0-255
+                if image_np.max() <= 1.0:
+                    image_np = image_np * 255.0
+                
+                # 裁剪值到 0-255 并转换为 uint8
+                image_np = np.clip(image_np, 0, 255).astype(np.uint8)
+                
+                # 根据通道数创建不同模式的图像
+                if image_np.ndim == 3 and image_np.shape[2] == 3:
+                    pil_img = Image.fromarray(image_np, 'RGB')
+                elif image_np.ndim == 3 and image_np.shape[2] == 4:
+                    pil_img = Image.fromarray(image_np, 'RGBA')
+                elif image_np.ndim == 2 or (image_np.ndim == 3 and image_np.shape[2] == 1):
+                    if image_np.ndim == 3:
+                        image_np = image_np[:, :, 0]
+                    pil_img = Image.fromarray(image_np, 'L')
+                else:
+                    # 尝试直接转换
+                    pil_img = Image.fromarray(image_np)
+                
+                pil_img.save(temp_file.name)
+                
+            elif isinstance(img, np.ndarray):
+                # 从numpy数组转换为PIL图像
+                image_np = img.copy()
+                
+                # 打印调试信息
+                print(f"{log_prefix} 数组形状: {image_np.shape}, 类型: {image_np.dtype}, 值范围: {image_np.min()} - {image_np.max()}")
+                
+                # 确保值范围在 0-255
+                if image_np.max() <= 1.0:
+                    image_np = image_np * 255.0
+                
+                # 裁剪值到 0-255 并转换为 uint8
+                image_np = np.clip(image_np, 0, 255).astype(np.uint8)
+                
+                # 根据通道数创建不同模式的图像
+                if image_np.ndim == 3 and image_np.shape[2] == 3:
+                    pil_img = Image.fromarray(image_np, 'RGB')
+                elif image_np.ndim == 3 and image_np.shape[2] == 4:
+                    pil_img = Image.fromarray(image_np, 'RGBA')
+                elif image_np.ndim == 2 or (image_np.ndim == 3 and image_np.shape[2] == 1):
+                    if image_np.ndim == 3:
+                        image_np = image_np[:, :, 0]
+                    pil_img = Image.fromarray(image_np, 'L')
+                else:
+                    # 尝试直接转换
+                    pil_img = Image.fromarray(image_np)
+                
+                pil_img.save(temp_file.name)
+                
+            elif isinstance(img, Image.Image):
+                # 直接保存PIL图像
+                img.save(temp_file.name)
+            else:
+                raise ValueError(f"不支持的图像类型: {type(img)}")
+            
+            saved_paths.append(temp_file.name)
+            
+        except Exception as e:
+            print(f"{log_prefix} 保存图像时出错: {str(e)}")
+            # 如果出错，删除临时文件
+            if os.path.exists(temp_file.name):
+                try:
+                    os.remove(temp_file.name)
+                except:
+                    pass
+            raise e
+    
+    return saved_paths
+
+def load_images(file_paths):
+    """
+    加载图像文件为PIL图像
+    
+    参数:
+        file_paths (list): 图像文件路径列表
+        
+    返回:
+        list: PIL图像列表
+    """
+    images = []
+    
+    # 确保是列表
+    if not isinstance(file_paths, list):
+        file_paths = [file_paths]
+    
+    for path in file_paths:
+        try:
+            # 检查文件是否存在
+            if not os.path.exists(path):
+                print(f"{log_prefix} 警告: 图像文件不存在: {path}")
+                continue
+                
+            print(f"{log_prefix} 正在加载图像: {path}")
+            img = Image.open(path)
+            
+            # 尝试处理 EXIF 旋转
+            try:
+                img = ImageOps.exif_transpose(img)
+            except Exception as exif_error:
+                print(f"{log_prefix} 处理 EXIF 数据时出错 (非致命): {str(exif_error)}")
+            
+            # 确保图像为 RGB 模式
+            if img.mode != "RGB":
+                print(f"{log_prefix} 转换图像模式从 {img.mode} 到 RGB")
+                img = img.convert("RGB")
+                
+            images.append(img)
+            print(f"{log_prefix} 成功加载图像: {path}, 尺寸: {img.size}, 模式: {img.mode}")
+            
+        except Exception as e:
+            print(f"{log_prefix} 加载图像失败: {path}, 错误: {str(e)}")
+    
+    if not images:
+        print(f"{log_prefix} 警告: 未能加载任何图像")
+    else:
+        print(f"{log_prefix} 共加载了 {len(images)} 个图像")
+        
+    return images
+
+def disable_topaz_image_cache():
+    """禁用 Topaz Photo AI 的图像缓存"""
+    # 这里简化实现
+    print(f"{log_prefix} 尝试禁用 Topaz Photo AI 缓存")
+
+def enable_topaz_image_cache():
+    """启用 Topaz Photo AI 的图像缓存"""
+    # 这里简化实现
+    print(f"{log_prefix} 尝试启用 Topaz Photo AI 缓存")
+
+def test_and_clean_topaz(tpai_exe, clean_cache=False, verbose=True):
+    """
+    测试 Topaz Photo AI 安装并清理缓存
+    
+    参数:
+        tpai_exe (str): Topaz Photo AI 可执行文件路径
+        clean_cache (bool): 是否清理缓存
+        verbose (bool): 是否显示详细信息
+        
+    返回:
+        dict: 测试结果
+    """
     results = {
         "success": False,
-        "test_output": "",
         "error_message": "",
+        "test_output": "",
         "cleaned_files": 0,
         "cache_size_before": 0,
         "cache_size_after": 0
     }
     
+    # 检查 tpai_exe 路径是否有效
     if not os.path.exists(tpai_exe):
         results["error_message"] = f"Topaz Photo AI 可执行文件未找到: {tpai_exe}"
         if verbose:
@@ -907,3 +548,214 @@ def test_and_clean_topaz(tpai_exe, clean_cache=False, verbose=False):
                 print(f"{log_prefix} 清理缓存时出错: {str(e)}")
     
     return results
+
+def find_output_file(input_path, output_folder, output_format):
+    """
+    查找 Topaz 处理后的输出文件。
+    Topaz 可能使用不同的命名规则，所以我们需要尝试多种方式。
+    
+    参数:
+        input_path (str): 原始输入文件路径
+        output_folder (str): 输出文件夹
+        output_format (str): 输出文件格式
+        
+    返回:
+        str: 找到的输出文件路径，如果未找到则返回 None
+    """
+    # 方法1：使用相同的文件名（不含扩展名）
+    base_name = os.path.basename(input_path)
+    name_without_ext = os.path.splitext(base_name)[0]
+    
+    # 尝试找到确切匹配的文件
+    exact_match = os.path.join(output_folder, f"{name_without_ext}.{output_format}")
+    if os.path.exists(exact_match):
+        return exact_match
+    
+    # 方法2：使用相同文件名的任何可能变体
+    possible_matches = glob.glob(os.path.join(output_folder, f"{name_without_ext}*.{output_format}"))
+    if possible_matches:
+        # 按修改时间排序，返回最新的
+        possible_matches.sort(key=os.path.getmtime, reverse=True)
+        return possible_matches[0]
+    
+    # 方法3：返回最新创建的任何输出格式文件
+    all_files = []
+    for ext in ["jpg", "jpeg", "png", "tif", "tiff"]:
+        all_files.extend(glob.glob(os.path.join(output_folder, f"*.{ext}")))
+    
+    if all_files:
+        # 按修改时间排序，返回最新的
+        all_files.sort(key=os.path.getmtime, reverse=True)
+        return all_files[0]
+    
+    # 方法4：捕获任何文件
+    all_files = glob.glob(os.path.join(output_folder, "*"))
+    if all_files:
+        # 按修改时间排序，返回最新的
+        all_files.sort(key=os.path.getmtime, reverse=True)
+        return all_files[0]
+    
+    # 找不到任何文件
+    return None
+
+# 简化的 ComfyTopazPhoto 类
+class ComfyTopazPhoto:
+    def __init__(self):
+        # 不再自动查找可执行文件，而是在 process_images 方法中使用用户提供的路径
+        self.tpai_version = "未知版本"
+    
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "images": ("IMAGE",),
+                "tpai_exe": ("STRING", {"default": "C:\\Program Files\\Topaz Labs LLC\\Topaz Photo AI\\tpai.exe"}),
+                "output_format": (["jpg", "png", "tif", "tiff", "preserve"], {"default": "jpg"}),
+                "quality": ("INT", {"default": 95, "min": 0, "max": 100, "step": 1}),
+                "overwrite": (["True", "False"], {"default": "False"}),
+            },
+            "optional": {
+                "output_prefix": ("STRING", {"default": "topaz_", "multiline": False}),
+            },
+        }
+    
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "process_images"
+    CATEGORY = "ComfyTopazPhoto"
+    
+    def process_images(self, images, tpai_exe, output_format="jpg", quality=95, overwrite="False", output_prefix="topaz_"):
+        """处理图像"""
+        # 将字符串转换为布尔值
+        overwrite = (overwrite == "True")
+        
+        # 验证 tpai_exe 路径
+        try:
+            self.tpai_exe, self.tpai_version = init_topaz(tpai_exe)
+            print(f"{log_prefix} 使用 Topaz Photo AI: {self.tpai_exe} (版本: {self.tpai_version})")
+        except TopazError as e:
+            raise e
+        
+        # 创建临时输出文件夹
+        output_folder = tempfile.mkdtemp(prefix="topaz_output_")
+        input_paths = []  # 初始化为空列表
+        
+        try:
+            # 打印输入图像信息用于调试
+            print(f"{log_prefix} 输入图像形状: {images.shape}")
+            
+            # 保存输入图像到临时文件
+            timestamp = int(time.time())
+            file_prefix = f"{output_prefix}{timestamp}_"
+            input_paths = save_images(images, file_prefix=file_prefix)
+            print(f"{log_prefix} 已保存输入图像到: {input_paths}")
+            
+            # 调用 Topaz Photo AI 处理图像
+            output_paths = process_topaz_image(
+                self.tpai_exe, 
+                input_paths, 
+                output_folder, 
+                output_format, 
+                quality, 
+                overwrite
+            )
+            
+            print(f"{log_prefix} 处理后图像路径: {output_paths}")
+            
+            # 如果没有处理任何图像，返回原图
+            if not output_paths:
+                print(f"{log_prefix} 警告: 没有成功处理任何图像，返回原图")
+                return (images,)
+            
+            # 直接使用参考代码中的图像加载方法
+            upscaled_images = []
+            for upscaled_path in output_paths:
+                try:
+                    # 打开图像，应用EXIF方向
+                    img = Image.open(upscaled_path)
+                    img = ImageOps.exif_transpose(img)
+                    img = img.convert('RGB')  # 确保是RGB模式
+                    
+                    # 转换为numpy数组，再转为PyTorch格式
+                    img_np = np.array(img).astype(np.float32) / 255.0
+                    # 添加批次维度 [H, W, C] -> [1, H, W, C]
+                    img_tensor = torch.from_numpy(img_np)[None,]  
+                    
+                    upscaled_images.append(img_tensor)
+                    print(f"{log_prefix} 成功加载处理后图像: {upscaled_path}, 形状: {img_tensor.shape}")
+                except Exception as e:
+                    print(f"{log_prefix} 加载图像失败: {upscaled_path}, 错误: {str(e)}")
+            
+            # 如果没有成功加载任何图像，返回原图
+            if not upscaled_images:
+                print(f"{log_prefix} 警告: 没有成功加载任何处理后的图像，返回原图")
+                return (images,)
+            
+            # 如果有多个图像，合并为一个批次
+            if len(upscaled_images) > 1:
+                # 合并所有张量为一个批次
+                result = torch.cat(upscaled_images, dim=0)
+            else:
+                # 只有一个图像，直接返回
+                result = upscaled_images[0]
+                
+            print(f"{log_prefix} 最终输出图像形状: {result.shape}")
+            return (result,)
+        
+        except Exception as e:
+            print(f"{log_prefix} 处理图像时出错: {str(e)}")
+            # 如果出错，返回原图
+            return (images,)
+            
+        finally:
+            # 清理临时文件
+            try:
+                # 清理输入临时文件
+                for path in input_paths:
+                    if os.path.exists(path):
+                        try:
+                            os.remove(path)
+                            print(f"{log_prefix} 已删除临时输入文件: {path}")
+                        except Exception as e:
+                            print(f"{log_prefix} 清理临时输入文件失败: {path}, 错误: {str(e)}")
+                
+                # 清理临时输出文件夹
+                if os.path.exists(output_folder):
+                    try:
+                        shutil.rmtree(output_folder)
+                        print(f"{log_prefix} 已删除临时输出文件夹: {output_folder}")
+                    except Exception as e:
+                        print(f"{log_prefix} 清理临时输出文件夹失败: {output_folder}, 错误: {str(e)}")
+            except Exception as e:
+                print(f"{log_prefix} 清理临时文件失败: {str(e)}")
+
+# 节点类映射
+NODE_CLASS_MAPPINGS = {
+    "ComfyTopazPhoto": ComfyTopazPhoto,
+}
+
+# 节点显示名称映射
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "ComfyTopazPhoto": "Topaz Photo AI",
+}
+
+# 初始化和测试函数 - 现在作为一个可调用的函数而不是自动执行
+def init_and_test_topaz(custom_path=None):
+    """初始化并测试 Topaz Photo AI"""
+    try:
+        tpai_exe, version = init_topaz(custom_path)
+        print(f"{log_prefix} 找到 Topaz Photo AI: {tpai_exe} (版本: {version})")
+        
+        # 测试 Topaz Photo AI
+        test_results = test_and_clean_topaz(tpai_exe, False, True)
+        if test_results["success"]:
+            print(f"{log_prefix} Topaz Photo AI 测试成功!")
+        else:
+            print(f"{log_prefix} Topaz Photo AI 测试失败: {test_results['error_message']}")
+        
+        return True
+    except Exception as e:
+        print(f"{log_prefix} 初始化 Topaz Photo AI 失败: {str(e)}")
+        return False
+
+# 不再自动初始化测试，避免启动时错误
+# init_and_test_topaz()

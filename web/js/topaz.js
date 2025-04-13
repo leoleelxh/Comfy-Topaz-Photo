@@ -14,7 +14,7 @@ const ext = {
         });        
     },
     async beforeRegisterNodeDef(nodeType, nodeData, _app) {
-        if (nodeData.name === 'TopazPhotoAI') {
+        if (nodeData.name === 'ComfyTopazPhoto') {
             const ensureTpai = async (node) => {
                 const tpaiWidget = node.widgets.find(w => w.name === "tpai_exe");
                 if (tpaiWidget && tpaiWidget.value === "") {
@@ -23,15 +23,15 @@ const ext = {
             }
 
             const onConfigure = nodeType.prototype.onConfigure;
-            nodeType.prototype.onConfigure = function () {
-                const r = onConfigure ? onConfigure.apply(this, arguments) : undefined;
+            nodeType.prototype.onConfigure = function(...args) {
+                const r = onConfigure ? onConfigure.apply(this, args) : undefined;
                 ensureTpai(this);
                 return r;
             };
 
             const onNodeCreated = nodeType.prototype.onNodeCreated;
-            nodeType.prototype.onNodeCreated = function () {
-                const r = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
+            nodeType.prototype.onNodeCreated = function(...args) {
+                const r = onNodeCreated ? onNodeCreated.apply(this, args) : undefined;
                 ensureTpai(this);
                 return r;
             };

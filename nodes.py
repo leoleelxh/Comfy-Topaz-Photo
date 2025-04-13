@@ -5,32 +5,19 @@ import comfy.model_management as model_management
 
 from .topaz import (
     init_topaz,
-    process_topaz_image,
-    disable_topaz_image_cache,
-    enable_topaz_image_cache,
-    test_and_clean_topaz
+    test_and_clean_topaz,
+    ComfyTopazPhoto,
+    NODE_CLASS_MAPPINGS as TOPAZ_NODE_CLASS_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as TOPAZ_NODE_DISPLAY_NAME_MAPPINGS
 )
 
-# ... existing code ...
-
-class ComfyTopazPhotoModelLoader:
-    # ... existing code ...
-
-class ComfyTopazPhotoImageProcessor:
-    # ... existing code ...
-
-class ComfyTopazPhotoDisableCache:
-    # ... existing code ...
-
-class ComfyTopazPhotoEnableCache:
-    # ... existing code ...    
-
-# 添加新的节点，用于测试和清理 Topaz Photo AI
+# 添加测试和清理节点
 class ComfyTopazPhotoTestAndClean:
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
+                "tpai_exe": ("STRING", {"default": "C:\\Program Files\\Topaz Labs LLC\\Topaz Photo AI\\tpai.exe"}),
                 "clean_cache": (["True", "False"], {"default": "False"}),
                 "verbose": (["True", "False"], {"default": "True"}),
             },
@@ -41,16 +28,14 @@ class ComfyTopazPhotoTestAndClean:
     FUNCTION = "test_and_clean"
     CATEGORY = "ComfyTopazPhoto"
 
-    def test_and_clean(self, clean_cache, verbose):
+    def test_and_clean(self, tpai_exe, clean_cache, verbose):
         # 将字符串转换为布尔值
         clean_cache = (clean_cache == "True")
         verbose = (verbose == "True")
         
-        # 获取 Topaz Photo AI 可执行文件路径
-        try:
-            tpai_exe = init_topaz()[0]
-        except Exception as e:
-            return ("ERROR", f"无法初始化 Topaz Photo AI: {str(e)}", 0, 0.0, 0.0)
+        # 验证 tpai_exe 路径是否存在
+        if not os.path.exists(tpai_exe):
+            return ("ERROR", f"Topaz Photo AI 可执行文件未找到: {tpai_exe}", 0, 0.0, 0.0)
         
         # 调用测试和清理函数
         results = test_and_clean_topaz(tpai_exe, clean_cache, verbose)
@@ -72,19 +57,14 @@ class ComfyTopazPhotoTestAndClean:
         
         return (status, message, results["cleaned_files"], cache_before_MB, cache_after_MB)
 
-# 节点列表
+# 合并节点映射
 NODE_CLASS_MAPPINGS = {
-    "ComfyTopazPhotoModelLoader": ComfyTopazPhotoModelLoader,
-    "ComfyTopazPhotoImageProcessor": ComfyTopazPhotoImageProcessor,
-    "ComfyTopazPhotoDisableCache": ComfyTopazPhotoDisableCache,
-    "ComfyTopazPhotoEnableCache": ComfyTopazPhotoEnableCache,
+    **TOPAZ_NODE_CLASS_MAPPINGS,
     "ComfyTopazPhotoTestAndClean": ComfyTopazPhotoTestAndClean,
 }
 
+# 合并显示名称映射
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "ComfyTopazPhotoModelLoader": "Topaz Photo AI",
-    "ComfyTopazPhotoImageProcessor": "Topaz Photo AI Processor",
-    "ComfyTopazPhotoDisableCache": "Disable Topaz Cache",
-    "ComfyTopazPhotoEnableCache": "Enable Topaz Cache",
+    **TOPAZ_NODE_DISPLAY_NAME_MAPPINGS,
     "ComfyTopazPhotoTestAndClean": "Test & Clean Topaz",
 } 

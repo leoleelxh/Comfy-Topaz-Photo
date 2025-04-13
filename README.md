@@ -2,9 +2,11 @@
 
 Integrate Topaz Photo AI's powerful image enhancement capabilities directly into your ComfyUI workflows.
 
-This node allows you to call the `tpai.exe` command-line interface from within ComfyUI to upscale, sharpen, denoise, and apply other adjustments offered by Topaz Photo AI.
+This node allows you to call the `tpai.exe` command-line interface from within ComfyUI to apply enhancements offered by Topaz Photo AI through its Autopilot settings.
 
-**Note:** This node is based on the work of [choey/Comfy-Topaz](https://github.com/choey/Comfy-Topaz) and has been adapted and debugged for compatibility with newer versions of Topaz Photo AI.
+## 重要更新: 简化版本
+
+该扩展现已完全简化，专注于通过 Topaz Photo AI CLI 使用 Autopilot 设置进行基本图像处理。所有增强参数现在应该通过 Topaz Photo AI GUI 中的 Autopilot 设置进行配置。
 
 ## Requirements
 
@@ -21,211 +23,191 @@ This node allows you to call the `tpai.exe` command-line interface from within C
 2.  Alternatively, download the repository contents as a ZIP file and extract it into `ComfyUI/custom_nodes/ComfyTopazPhoto`.
 3.  **Restart ComfyUI.**
 
-## Usage
+## 使用流程详解
 
-**⚠️ CRITICAL UPSCALING REQUIREMENT ⚠️**
+### 完整工作流程
 
-The upscale factor (`scale`) for Topaz Photo AI **cannot be controlled** from within ComfyUI using this node. You **must** set your desired upscale factor directly in the Topaz Photo AI application settings:
+使用 ComfyTopazPhoto 的完整流程包括以下几个步骤：
 
-1. Open Topaz Photo AI application
-2. Go to **Preferences -> Autopilot -> Upscale & Resize**
-3. Set your desired fixed upscale factor (e.g., 2x, 4x)
-4. Save preferences
+1. **安装前准备**
+   - 确保 Topaz Photo AI 正确安装并激活
+   - 确认 AI 模型已正确下载（可以通过打开 Topaz Photo AI 并处理一张测试图像来验证）
+   - 确认 `tpai.exe` 的正确路径（通常在 `C:\Program Files\Topaz Labs LLC\Topaz Photo AI\tpai.exe`）
 
-The corresponding input for `scale` **is not available** on the `ComfyTopazPhoto Upscale Settings` node because it would be **ignored** by the application.
+2. **配置 Autopilot 设置**
+   - 打开 Topaz Photo AI 应用程序
+   - 进入 **Preferences -> Autopilot**
+   - 根据需要配置增强参数：
+     * **Upscale & Resize**: 选择放大比例（2x、4x等）
+     * **Face Recovery**: 调整面部恢复强度
+     * **Sharpen**: 调整锐化程度
+     * **Denoise**: 设置降噪级别
+     * **文字恢复**: 如需要，启用文字恢复功能
+   - 保存设置（这些设置将在 CLI 调用中使用）
 
-**Important Note:** The `scale` value set in the ComfyUI interface will be completely ignored by `tpai.exe`. The upscale factor is **exclusively determined** by what you've set in the Topaz Photo AI GUI. This is a limitation of the `tpai.exe` command-line interface, not of this ComfyUI node.
+3. **ComfyUI 工作流设置**
+   - 在 ComfyUI 中，添加以下节点：
+     * 图像源节点（例如 Load Image、VAE Decode 等）
+     * **Topaz Photo AI** 节点：主处理节点
+   - 连接图像源到 Topaz Photo AI 节点的 `images` 输入
+   - 配置 Topaz Photo AI 节点参数：
+     * `tpai_exe`: 设置 Topaz Photo AI 的可执行文件路径（例如 `C:\Program Files\Topaz Labs LLC\Topaz Photo AI\tpai.exe`）
+     * `output_format`: 选择输出格式（jpg、png、tif等）
+     * `quality`: 设置 JPEG 质量（对于jpg格式）
+     * `overwrite`: 是否覆盖已存在的文件
 
-After installation, you will find the following nodes under the `ComfyTopazPhoto` category:
+4. **运行处理**
+   - 运行工作流
+   - ComfyUI 会自动调用 Topaz Photo AI 对图像进行处理
+   - 处理完成后，增强后的图像将在 ComfyUI 中显示
 
-*   **`ComfyTopazPhoto` (Main Node):** This is the core node that executes Topaz Photo AI.
-*   **`ComfyTopazPhoto Upscale Settings`:** Connect this node to the `upscale` input of the main node to enable and partially control upscaling.
-*   **`ComfyTopazPhoto Sharpen Settings`:** Connect this node to the `sharpen` input of the main node to enable and partially control sharpening.
+5. **故障排除（如需）**
+   - 如果遇到问题，可以在 ComfyUI 中添加 **Test & Clean Topaz** 节点
+   - 设置 `tpai_exe` 为 Topaz Photo AI 的可执行文件路径
+   - 设置 `clean_cache` 为 True 清理缓存
+   - 设置 `verbose` 为 True 获取详细日志
+   - 运行此节点测试 Topaz Photo AI 安装情况并清理缓存
 
-### Inputs (Main Node)
+### 实际使用案例
 
-*   `images`: The input image(s) to process.
-*   `tpai_exe`: **Required.** The full path to your `tpai.exe` executable (e.g., `H:\\Program Files\\Topaz Labs LLC\\Topaz Photo AI\\tpai.exe`).
-*   `compression`: PNG compression level (0-10, default: 2).
-*   `upscale`: (Optional) Connect the output of the `ComfyTopazPhoto Upscale Settings` node here.
-*   `sharpen`: (Optional) Connect the output of the `ComfyTopazPhoto Sharpen Settings` node here.
-
-### Inputs (Settings Nodes - Upscale & Sharpen)
-
-*   `enabled`: Set to `true` to enable this enhancement (Upscale or Sharpen).
-*   `model`: Select the specific AI model to use for the enhancement. **This parameter should be correctly passed to `tpai.exe`.**
-*   **Upscale Parameters:**
-    *   **⚠️ IMPORTANT:** The `scale` parameter is **NOT available** on this node. The upscale factor is determined **exclusively** by the settings in the Topaz Photo AI GUI under **Preferences -> Autopilot -> Upscale & Resize**. You **must** configure this setting in the GUI before using this node for upscaling.
-    *   `denoise` (param1), `deblur` (param2), `detail` (param3): These parameters **should** be correctly passed to `tpai.exe` and override the defaults when Upscale is enabled.
-*   **Sharpen Parameters:**
-    *   `strength` (param1), `denoise` (param2), `compression`, `is_lens`, etc.: Similar to upscale, it's highly likely that only the `model` parameter is reliably passed via CLI due to `tpai.exe` limitations. Other parameters are likely ignored, and Topaz Photo AI's defaults will be used. (Further testing needed if specific sharpen parameters are critical).
-
-### Outputs (Main Node)
-
-*   `IMAGE`: The processed image(s).
-*   `settings`: A string containing the final JSON settings used by `tpai.exe` to process the image (excluding Autopilot settings, reflecting the parameters `tpai.exe` actually used).
-*   `autopilot_settings`: A string containing the Autopilot settings detected by `tpai.exe`.
-
-### Workflow Strategy
-
-1.  **Set Fixed Upscale Factor in Topaz GUI:** *(Required step)* Open Topaz Photo AI, go to Preferences -> Autopilot -> Upscale & Resize, and set your desired **default** upscale factor (e.g., 2x, 4x). Save preferences. **This step is mandatory** - without it, your images will be upscaled according to whatever default factor is currently set in the Topaz GUI, regardless of what you select in ComfyUI.
-2.  **Use ComfyUI Node:**
-    *   Connect the `ComfyTopazPhoto Upscale Settings` node if you want Topaz to perform upscaling (using the factor set in the GUI).
-    *   Set `enabled` to `true`.
-    *   Select the desired `model`.
-    *   Adjust `denoise`, `deblur`, `detail` sliders as needed (these should work).
-    *   Remember that the actual upscale factor is controlled by the Topaz GUI settings.
-    *   Connect the main `ComfyTopazPhoto` node and provide the `tpai_exe` path.
-3.  **For Variable Upscaling:** If you need different upscale factors within the *same* workflow, **do not** rely on the Topaz node for scaling. Instead:
-    *   Use a standard ComfyUI upscale node (like `Image Upscale with Model` or `ImageScale`) *before* the `ComfyTopazPhoto` node to achieve the desired size.
-    *   You can still use the `ComfyTopazPhoto` node afterward for other enhancements (like sharpening or applying denoise/deblur/detail via the Upscale node with `enabled=true` but knowing the scale factor comes from the GUI setting) or set `enabled=false` on the relevant Topaz setting node if you only want processing from other enabled Topaz modules.
-
-![Simple Workflow Example](demo1.png) *(Screenshot might show older node names and functionality)*
-
-## Current Limitations & Troubleshooting
-
-*   **Upscale Factor Control:** The upscale factor (`scale`) **cannot** be controlled from this node. It **must** be preset in the Topaz Photo AI GUI preferences (Autopilot settings). **There is no workaround for this limitation** as it is inherent to how the `tpai.exe` command-line interface functions. If you need different upscale factors for different images, you will need to either:
-    * Change the setting in the Topaz GUI between ComfyUI runs, or
-    * Use a standard ComfyUI upscale node before the Topaz node to achieve the desired size
-*   **Parameter Override Reliability:** Only the `model`, and potentially the `param1`/`param2`/`param3` for upscale, seem reliably passed via the CLI. Other specific parameters on the settings nodes are likely ignored due to `tpai.exe` limitations.
-*   **`Could not load model` Error:** Likely an issue with the Topaz Photo AI installation or model files. Check the main app and Topaz logs (`AppData\Local\Topaz Labs LLC\Topaz Photo AI\Logs`).
-*   **Initial Setup:** Ensure the `tpai_exe` path is correct.
-
-## Future Development (TODO)
-
-*   Monitor future `tpai.exe` versions for potential fixes or documented changes to CLI parameter handling.
-*   Update documentation if Topaz Labs clarifies or fixes CLI parameter behavior.
-*   Consider adding separate nodes for other CLI-controllable features if they prove reliable (e.g., Denoise module if its `strength`, `minor_deblur` etc. parameters work via CLI).
-
-## Proposed Improvement
-
-Based on code analysis, the current implementation can be simplified to make it more user-friendly. Since many of the parameters passed to `tpai.exe` are ignored or unreliable, we can streamline the nodes to focus only on enabling/disabling features:
-
-### Suggested Changes:
-
-1. **Simplify Settings Nodes**:
-   * Replace all parameter inputs with just an `enabled` toggle
-   * Remove confusing parameters that have no effect on the final output
-   * The model selection can be kept as it seems to be reliably passed to `tpai.exe`
-
-2. **Updated Code Example**:
-   ```python
-   # Simplified Upscale Settings Node
-   class ComfyTopazPhotoUpscaleSettings:
-       @classmethod
-       def INPUT_TYPES(cls):
-           return {
-               'required': {
-                   'enabled': ('BOOLEAN', {'default': False}),
-                   'model': ([
-                       'Standard', 
-                       'Standard V2', 
-                       'High Fidelity', 
-                       'High Fidelity V2', 
-                       'Low Resolution'
-                   ], {'default': 'Standard V2'}),
-               },
-           }
-       
-       RETURN_TYPES = ('ComfyTopazPhotoUpscaleSettings',)
-       FUNCTION = 'init'
-       CATEGORY = 'ComfyTopazPhoto'
-       
-       def init(self, enabled, model):
-           self.enabled = enabled
-           self.model = model
-           return (self,)
-   ```
-
-3. **Main Node Implementation**:
-   * Keep the current command line argument structure
-   * Remove parameter passing code except for the model selection
-   * Use the Topaz Photo AI defaults for all other parameters, which will be controlled via the GUI settings
-
-4. **User Experience Benefits**:
-   * More intuitive interface
-   * Less confusion about which parameters actually work
-   * Clearer expectations about what settings need to be configured in the Topaz GUI
-   * Simplified workflow with fewer potential errors
-
-This approach would make the node much more straightforward to use - simply toggle 'enabled' for the features you want to use (upscale/sharpen), select a model, and let Topaz Photo AI's built-in settings handle the rest.
-
-### Inputs (Settings Nodes - Simplified)
-
-*   `enabled`: Boolean toggle to enable/disable this enhancement (Upscale or Sharpen).
-*   `model`: Select the specific AI model to use for the enhancement. **This parameter should be correctly passed to `tpai.exe`.**
-
-### Workflow Strategy (Simplified)
-
-1. **Set Fixed Upscale Factor in Topaz GUI:** *(Required step)* Open Topaz Photo AI, go to Preferences -> Autopilot -> Upscale & Resize, and set your desired **default** upscale factor (e.g., 2x, 4x). Set other parameters like denoise, deblur, etc. as desired directly in the Topaz GUI.
-
-2. **Use ComfyUI Node:**
-   * Connect the `ComfyTopazPhoto Upscale Settings` node to the main node
-   * Simply toggle `enabled` to `true` to activate upscaling
-   * Select the desired `model`
-   * Connect the main `ComfyTopazPhoto` node and provide the `tpai_exe` path
-
-This simplified approach better reflects the actual capabilities of the `tpai.exe` command-line interface and provides a cleaner user experience.
-
-## Implementation Status
-
-✅ **Simplification Completed!**
-
-The code has been updated to implement the simplified approach described above. The main changes include:
-
-1. Simplified `ComfyTopazPhotoUpscaleSettings` and `ComfyTopazPhotoSharpenSettings` classes:
-   * Removed all parameters except `enabled` and `model`
-   * Simplified initialization methods
-
-2. Modified `topaz_upscale` method:
-   * Removed code that tried to pass parameters that were being ignored
-   * Only passes the model selection which seems to be reliably handled by `tpai.exe`
-   * Added better logging for clarity
-
-### How to Use the Simplified Version
-
-With this simplified implementation, your workflow becomes much more straightforward:
-
-1. **Configure Topaz Photo AI GUI** - Set up all your preferred enhancement parameters (upscale factor, denoise strength, deblur, etc.) directly in the Topaz Photo AI application.
-
-2. **In ComfyUI:**
-   * Add the `ComfyTopazPhoto` main node
-   * Add `ComfyTopazPhoto Upscale Settings` and/or `ComfyTopazPhoto Sharpen Settings` nodes
-   * For each settings node, simply:
-     * Set `enabled` to `true` for the features you want to use
-     * Select the appropriate `model`
-   * Connect these settings nodes to the main node
-   * Connect your image source to the main node
-   * Provide the path to `tpai.exe`
-
-3. **Run Your Workflow** - The image will be processed according to:
-   * The models you selected in ComfyUI
-   * The parameters you configured in the Topaz Photo AI GUI
-
-### Simplified Workflow Diagram
+#### 基本图像增强工作流
 
 ```
-+-------------------+
-| Image Source      |
-+--------+----------+
+[Load Image] --> [Topaz Photo AI] --> [Preview Image]
+```
+
+在这个简单工作流中：
+1. 加载图像
+2. 通过 Topaz Photo AI 节点处理（使用 Autopilot 预设的增强参数）
+3. 预览结果
+
+#### 与其他 ComfyUI 节点结合使用
+
+```
+[Load Image] --> [其他处理节点] --> [Topaz Photo AI] --> [后续处理节点] --> [Preview Image]
+```
+
+例如，你可以：
+1. 使用 ComfyUI 的 SD 生成图像
+2. 应用其他效果
+3. 使用 Topaz Photo AI 进行最终的增强处理
+4. 应用后期处理效果
+5. 保存或预览结果
+
+### 视觉流程示例
+
+下面是一个简单的 ComfyUI 工作流程图示例：
+
+```
++------------------+
+| Load Image       |
++--------+---------+
          |
          v
-+--------+-------------------+     +----------------------------------+
-| ComfyTopazPhoto            |<----| ComfyTopazPhoto Upscale         |
-| +----------------------+   |     | +---------------------------+   |
-| | images               |   |     | | enabled: true             |   |
-| | tpai_exe: [path]     |<--+-----+ | model: Standard V2        |   |
-| | upscale              |   |     | +---------------------------+   |
-| | sharpen              |<--+     +----------------------------------+
-| +----------------------+   |    
-|                            |     +----------------------------------+
-+--------+-------------------+     | ComfyTopazPhoto Sharpen         |
-         |                         | +---------------------------+   |
-         v                         | | enabled: false            |   |
-+--------+----------+              | | model: Standard           |   |
-| Output Image      |              | +---------------------------+   |
-+-------------------+              +----------------------------------+
++--------+---------+     +------------------+
+| Topaz Photo AI   |     | Test & Clean     |
+| tpai_exe: C:\... |     | tpai_exe: C:\... |
+| output_format:jpg|     | clean_cache: True|
+| quality: 95      |     +------------------+
++--------+---------+
+         |
+         v
++--------+---------+
+| Preview Image    |
++------------------+
 ```
 
-This implementation acknowledges the limitations of the Topaz Photo AI command-line interface while providing a clean, intuitive way to leverage its powerful image enhancement capabilities within ComfyUI.
+## 关键使用说明
+
+- **必须正确设置 tpai_exe 路径**：这是 Topaz Photo AI 可执行文件的完整路径，例如 `C:\Program Files\Topaz Labs LLC\Topaz Photo AI\tpai.exe`
+- **所有增强参数都通过 Topaz Photo AI 的 Autopilot 设置控制**，而不是通过 ComfyUI 节点参数
+- Topaz Photo AI 应用程序和 ComfyUI 可以同时运行，但不要在 ComfyUI 处理图像时修改 Autopilot 设置
+- 处理大图像可能需要较长时间，请耐心等待
+- 所有临时文件会自动清理
+
+## 节点详情
+
+### Topaz Photo AI 节点
+
+**输入:**
+* `images`: 要处理的输入图像
+* `tpai_exe`: Topaz Photo AI 可执行文件路径 (tpai.exe)
+* `output_format`: 输出图像格式（jpg、png、tif、tiff、preserve）
+* `quality`: JPEG 质量 (0-100, 默认: 95)
+* `overwrite`: 是否覆盖现有文件
+
+**输出:**
+* `IMAGE`: 处理后的图像
+
+### Test & Clean Topaz 节点
+
+**输入:**
+* `tpai_exe`: Topaz Photo AI 可执行文件路径 (tpai.exe)
+* `clean_cache`: 是否清理 Topaz Photo AI 缓存
+* `verbose`: 是否显示详细日志信息
+
+**输出:**
+* `status`: 测试状态（SUCCESS 或 ERROR）
+* `message`: 测试结果消息
+* `cleaned_files`: 已清理的缓存文件数量
+* `cache_before_MB`: 清理前的缓存大小（MB）
+* `cache_after_MB`: 清理后的缓存大小（MB）
+
+## 查找 tpai.exe 路径
+
+Topaz Photo AI 可执行文件 (tpai.exe) 通常位于以下位置：
+
+* Windows: 
+  * `C:\Program Files\Topaz Labs LLC\Topaz Photo AI\tpai.exe`
+  * `C:\Program Files (x86)\Topaz Labs LLC\Topaz Photo AI\tpai.exe`
+  * `%LOCALAPPDATA%\Topaz Labs LLC\Topaz Photo AI\tpai.exe`
+
+* macOS:
+  * `/Applications/Topaz Photo AI.app/Contents/MacOS/tpai`
+  * `~/Applications/Topaz Photo AI.app/Contents/MacOS/tpai`
+
+如果 Topaz Photo AI 安装在非标准位置，您需要手动找到并提供正确的路径。
+
+## 高级使用技巧
+
+### 批量处理
+1. 使用 ComfyUI 的批处理功能加载多张图像
+2. 连接到 Topaz Photo AI 节点
+3. 所有图像将按顺序处理
+
+### 不同增强设置切换
+如果需要使用不同的增强设置处理不同批次的图像：
+1. 处理第一批图像
+2. 暂停 ComfyUI 工作流
+3. 打开 Topaz Photo AI 修改 Autopilot 设置
+4. 恢复 ComfyUI 工作流处理下一批图像
+
+## 故障排除
+
+* **tpai.exe 路径错误**：确保提供正确的 Topaz Photo AI 可执行文件路径。你可以在 Windows 中右键点击 tpai.exe 文件，选择"属性"，然后复制"位置"中的路径
+
+* **请确保 Topaz Photo AI 安装正确**：验证可以在命令行中运行 `tpai.exe --test`
+
+* **确保已设置 Autopilot 设置**：所有增强设置都通过 Topaz Photo AI 的 Autopilot 进行控制，不再通过节点参数传递
+
+* **处理失败**：查看控制台输出，可能是命令行参数问题。可以尝试使用 `Test & Clean Topaz` 节点清理缓存
+
+* **图像质量不满意**：调整 Topaz Photo AI 的 Autopilot 设置，而不是节点参数
+
+* **执行时间过长**：大图像处理可能需要较长时间；你也可以尝试清理缓存提高性能
+
+## 为什么简化？
+
+原因很简单：根据官方文档，Topaz Photo AI CLI 实际上依赖于 GUI 中的 Autopilot 设置，而无法通过命令行参数直接控制增强参数。我们的简化版本专注于使用基本的 CLI 参数（如输出格式和质量），并让 Autopilot 设置控制所有增强功能。
+
+这种方法有几个优点：
+1. 更直观的界面
+2. 更少的混淆（不再有看起来可以控制但实际无效的参数）
+3. 更清晰的期望（用户知道需要在 GUI 中配置什么）
+4. 简化的工作流程，减少潜在错误
+
+## 后续改进
+
+* 如果 Topaz Labs 更新 CLI 以支持更多直接参数控制，我们将相应更新扩展
+* 考虑添加更多选项，如批处理模式和其他 CLI 支持的参数
 
