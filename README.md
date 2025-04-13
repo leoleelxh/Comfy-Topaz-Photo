@@ -4,7 +4,14 @@ Integrate Topaz Photo AI's powerful image enhancement capabilities directly into
 
 This node allows you to call the `tpai.exe` command-line interface from within ComfyUI to apply enhancements offered by Topaz Photo AI through its Autopilot settings.
 
-## 重要更新: 简化版本
+## 重要更新: v1.0.0 版本发布
+
+我们很高兴地宣布 ComfyTopazPhoto 节点 v1.0.0 版本正式发布！此版本解决了多个关键问题并大幅提升了稳定性：
+
+- **全新图像格式处理系统**：现在支持多种 PyTorch 张量格式，能够正确处理 ComfyUI 中的各种图像格式
+- **智能输出文件检测**：新增 `find_output_file` 功能，能够在 Topaz 使用不同命名规则时仍能找到输出文件
+- **出错后自动恢复**：添加了重试机制和更好的异常处理，确保在遇到问题时能继续工作
+- **更详细的日志输出**：便于排查问题和了解处理过程
 
 该扩展现已完全简化，专注于通过 Topaz Photo AI CLI 使用 Autopilot 设置进行基本图像处理。所有增强参数现在应该通过 Topaz Photo AI GUI 中的 Autopilot 设置进行配置。
 
@@ -55,6 +62,7 @@ This node allows you to call the `tpai.exe` command-line interface from within C
      * `output_format`: 选择输出格式（jpg、png、tif等）
      * `quality`: 设置 JPEG 质量（对于jpg格式）
      * `overwrite`: 是否覆盖已存在的文件
+     * `output_prefix`: (可选) 自定义输出文件前缀
 
 4. **运行处理**
    - 运行工作流
@@ -135,6 +143,7 @@ This node allows you to call the `tpai.exe` command-line interface from within C
 * `output_format`: 输出图像格式（jpg、png、tif、tiff、preserve）
 * `quality`: JPEG 质量 (0-100, 默认: 95)
 * `overwrite`: 是否覆盖现有文件
+* `output_prefix`: (可选) 自定义输出文件前缀，默认为 "topaz_"
 
 **输出:**
 * `IMAGE`: 处理后的图像
@@ -184,6 +193,8 @@ Topaz Photo AI 可执行文件 (tpai.exe) 通常位于以下位置：
 
 ## 故障排除
 
+### 常见问题
+
 * **tpai.exe 路径错误**：确保提供正确的 Topaz Photo AI 可执行文件路径。你可以在 Windows 中右键点击 tpai.exe 文件，选择"属性"，然后复制"位置"中的路径
 
 * **请确保 Topaz Photo AI 安装正确**：验证可以在命令行中运行 `tpai.exe --test`
@@ -195,6 +206,22 @@ Topaz Photo AI 可执行文件 (tpai.exe) 通常位于以下位置：
 * **图像质量不满意**：调整 Topaz Photo AI 的 Autopilot 设置，而不是节点参数
 
 * **执行时间过长**：大图像处理可能需要较长时间；你也可以尝试清理缓存提高性能
+
+### 新版本特有问题解决
+
+* **图像格式兼容性错误**：如果看到类似 `Cannot handle this data type` 的错误，说明图像格式无法被正确处理。新版本已支持多种格式，但如果仍有问题，可尝试使用 ComfyUI 的格式转换节点先将图像转换为标准 RGB 格式。
+
+* **"未找到输出文件"错误**：新版本引入了智能文件查找功能，应能解决大多数文件路径问题。如果仍然报错，请检查以下几点：
+  * Topaz Photo AI 是否有足够权限写入临时目录
+  * 临时目录路径中是否含有非英文字符
+  * 检查 Topaz 应用程序本身是否可以正常处理图像
+
+* **处理超时**：如果处理大图像时超时，可以尝试：
+  * 先将图像缩小后再处理
+  * 增加节点的超时时间（在代码中可配置，默认为5分钟）
+  * 确保计算机有足够的内存和 GPU 资源
+
+* **临时文件未删除**：如果发现临时文件未被清理，可能是因为处理过程中发生了异常。新版本改进了临时文件清理机制，如果仍有问题，可手动删除临时目录中的文件。
 
 ## 为什么简化？
 
@@ -210,4 +237,5 @@ Topaz Photo AI 可执行文件 (tpai.exe) 通常位于以下位置：
 
 * 如果 Topaz Labs 更新 CLI 以支持更多直接参数控制，我们将相应更新扩展
 * 考虑添加更多选项，如批处理模式和其他 CLI 支持的参数
+* 计划添加预设功能，让用户可以保存和快速切换不同的 Autopilot 配置
 
