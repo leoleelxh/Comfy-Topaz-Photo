@@ -241,3 +241,8 @@ Topaz Photo AI 可执行文件 (tpai.exe) 通常位于以下位置：
 * 考虑添加更多选项，如批处理模式和其他 CLI 支持的参数
 * 计划添加预设功能，让用户可以保存和快速切换不同的 Autopilot 配置
 
+
+# 参考
+参考这个项目的处理简化而成，适配新版本的Topaz ：
+https://github.com/choey/Comfy-Topaz
+
