@@ -1,6 +1,6 @@
 [project]
-name = "topaz-photo"
-description = ""
+name = "Comfy-Topaz-Photo"
+description = "A ComfyUI node for integrating Topaz Photo AI's powerful image enhancement capabilities"
 version = "1.0.0"
 license = {file = "LICENSE"}
 

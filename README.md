@@ -1,5 +1,7 @@
 # ComfyUI Node for Topaz Photo AI (`ComfyTopazPhoto`)
 
+![]sample.jpg
+
 Integrate Topaz Photo AI's powerful image enhancement capabilities directly into your ComfyUI workflows.
 
 This node allows you to call the `tpai.exe` command-line interface from within ComfyUI to apply enhancements offered by Topaz Photo AI through its Autopilot settings.
